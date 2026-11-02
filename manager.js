@@ -2,21 +2,33 @@ const app = $('#app');
 let L = null; // lookups: products, restaurants, today
 let dayDate = null;
 const modal = html => { $('#modal').innerHTML = html ? `<div class="modal"><div class="sheet">${html}</div></div>` : ''; };
-const mapLink = r => r.map_url ? r.map_url : (r.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}` : '');
+const mapLink = r => r.map_url ? r.map_url : r.lat != null ? `https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lng}` : (r.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}` : '');
 const telLink = p => p ? `tel:${String(p).replace(/[^\d+]/g, '')}` : '';
 const waShare = text => `https://wa.me/?text=${encodeURIComponent(text)}`;
 
 async function start() {
   const me = await api('/api/me');
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); // اطلب من المتصفح ما يمسح البيانات
+  if (!me.has_pin) return setupView();
   if (me.role !== 'manager') return loginView();
   $('#logout').style.display = ''; $('#logout').onclick = async () => { await api('/api/logout', {}); location.reload(); };
   $('#nav').style.display = '';
   L = await api('/api/m/lookups'); dayDate = L.today;
   window.addEventListener('hashchange', route); route();
 }
+// أول تشغيل: يختار المدير رقمه السري (لا يوجد رقم افتراضي)
+function setupView() {
+  app.innerHTML = `${installWarning()}<div class="card"><h2 style="margin-top:0">أهلاً 👋 أول مرة</h2>
+   <p class="mut">اختر رقم سري للتطبيق (4–8 أرقام). احفظه منيح، ما في طريقة لاسترجاعه.</p>
+   <label>اسم المعمل</label><input id="su_n" value="معمل الأكل البيتي">
+   <label>الرقم السري</label><input id="su_p" inputmode="numeric" type="password" autocomplete="new-password">
+   <label>أعد كتابة الرقم السري</label><input id="su_p2" inputmode="numeric" type="password" autocomplete="new-password">
+   <div style="height:14px"></div><button class="btn block" id="su_s" style="min-height:68px">ابدأ ✓</button></div>`;
+  $('#su_s').onclick = async () => { try { await api('/api/setup', { factory_name: $('#su_n').value, pin: $('#su_p').value.trim(), confirm: $('#su_p2').value.trim() }); location.reload(); } catch (e) { toast(e.message); } };
+}
 function loginView() {
   let pin = '';
-  app.innerHTML = `<div class="card center"><h2>دخول المدير</h2><p class="mut">اكتب الرقم السري</p>
+  app.innerHTML = `${installWarning()}<div class="card center"><h2>دخول المدير</h2><p class="mut">اكتب الرقم السري</p>
    <div id="dots" style="font-size:40px;letter-spacing:12px;min-height:60px">&nbsp;</div>
    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;direction:ltr">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '⌫', 0, '✓'].map(k => `<button class="btn ${k === '✓' ? '' : 'sec'}" style="font-size:30px;min-height:72px" data-k="${k}">${k}</button>`).join('')}</div></div>`;
   app.querySelectorAll('[data-k]').forEach(b => b.onclick = async () => {
@@ -40,7 +52,11 @@ function bindDateBar(id, cb) { $(`#${id}-next`).onclick = () => { dayDate = addD
 async function dayView() {
   const D = await api('/api/m/day?date=' + dayDate);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  app.innerHTML = `
+  const REM = await api('/api/m/reminders').catch(() => []);
+  app.innerHTML = `${installWarning()}
+  ${REM.length ? `<div class="card remind"><div style="font-size:19px;font-weight:800;margin-bottom:6px">🔔 تنبيهات</div>${REM.map(r => `<div class="ritem">${r.kind === 'backup' ? '💾' : r.kind === 'supplier' ? '🧾' : r.kind === 'old' ? '🚚' : '📞'} ${esc(r.text)}</div>`).join('')}
+    ${REM.some(r => r.kind === 'backup') ? '<button class="btn block" id="bk_now" style="margin-top:10px;min-height:64px">💾 نسخ احتياطي الآن</button>' : ''}</div>` : ''}
+  ${L.restaurants.length ? '' : `<div class="card"><b>ابدأ بإضافة زبائنك</b> من تبويب «الزبائن» 🏪، وحدّد سعر الحبة من «المزيد ← الأصناف».<div class="row" style="margin-top:10px"><a class="btn sec sm" href="#/customers">🏪 إضافة زبون</a><button class="btn sec sm" id="rs_first">♻️ استعادة نسخة</button></div></div>`}
   <div class="card" style="border:3px solid var(--g)">
     <div style="font-size:21px;font-weight:800;margin-bottom:6px">➕ طلبية جديدة</div>
     <div class="mut">احكي أو اكتب، مثال: «السرايا 200 حبة ورق عنب و 100 ملفوف بكرة»</div>
@@ -67,6 +83,8 @@ async function dayView() {
      </div></div>`).join('')}
   ${D.orders.length ? `<div class="card center"><span class="mut">قيمة طلبيات اليوم:</span> <b class="money">${sar(D.day_total)}</b></div>` : ''}`;
   bindDateBar('db', dayView);
+  if ($('#bk_now')) $('#bk_now').onclick = () => doBackup(dayView);
+  if ($('#rs_first')) $('#rs_first').onclick = doRestore;
   app.querySelectorAll('[data-st]').forEach(b => b.onclick = async () => { await api(`/api/m/orders/${b.dataset.id}/status`, { status: b.dataset.st }); toast('تم ✅'); dayView(); });
   app.querySelectorAll('[data-edit]').forEach(b => b.onclick = async () => { const o = D.orders.find(x => x.restaurant_id == b.dataset.edit); openDraft([{ restaurant_id: o.restaurant_id, items: Object.fromEntries(o.items.map(i => [i.product_id, i.qty])), note: o.note }], D.date); });
   $('#manual').onclick = () => openDraft([{ restaurant_id: null, items: {} }], dayDate === L.today ? addDays(L.today, 1) : dayDate);
@@ -136,6 +154,7 @@ async function routeView() {
   const list = D.orders.filter(o => o.status !== 'cancelled');
   const left = list.filter(o => o.status !== 'delivered').length;
   app.innerHTML = `${dateBar(D.date, 'rb')}
+  ${list.length ? `<div class="card" id="mapcard"><div id="map" style="height:300px;border-radius:12px;background:#e8e8e8"></div><div id="mapnote" class="mut" style="margin-top:6px"></div><div id="gdir"></div></div>` : ''}
   <div class="card center" style="font-size:20px">${list.length ? (left ? `باقي <b>${left}</b> من ${list.length} توصيلات` : '✅ تم توصيل كل الطلبيات') : 'لا يوجد توصيلات لهذا اليوم'}</div>
   ${list.map((o, k) => `<div class="card" style="${o.status === 'delivered' ? 'opacity:.6' : ''}">
     <div class="row"><b style="font-size:24px;flex:0 0 44px;color:var(--g)">${k + 1}.</b><div style="flex:5"><b style="font-size:21px">${esc(o.restaurant_name)}</b><div class="mut">${esc(o.address || '')}</div></div>
@@ -146,6 +165,7 @@ async function routeView() {
   </div>`).join('')}
   <p class="mut center">الترتيب (▲▼) يُحفظ ويُستخدم كل يوم</p>`;
   bindDateBar('rb', routeView);
+  if (list.length) showRouteMap(list);
   app.querySelectorAll('[data-st]').forEach(b => b.onclick = async () => { await api(`/api/m/orders/${b.dataset.id}/status`, { status: b.dataset.st }); toast('تم ✅'); routeView(); });
   app.querySelectorAll('[data-mv]').forEach(b => b.onclick = async () => {
     const k = Number(b.dataset.k), j = k + Number(b.dataset.mv);
@@ -155,6 +175,32 @@ async function routeView() {
     ids[ia] = c; ids[ic] = a;
     await api('/api/m/route', { ids }); L = await api('/api/m/lookups'); routeView();
   });
+}
+
+// خريطة خط التوصيل (Leaflet + OpenStreetMap) — تحتاج إنترنت لتحميل الخريطة
+function loadLeaflet() {
+  if (window.L_) return Promise.resolve(window.L_);
+  return new Promise((res, rej) => {
+    const c = document.createElement('link'); c.rel = 'stylesheet'; c.href = 'vendor/leaflet/leaflet.css'; document.head.appendChild(c);
+    const s = document.createElement('script'); s.src = 'vendor/leaflet/leaflet.js'; s.onload = () => { window.L_ = window.L.noConflict ? window.L.noConflict() : window.L; res(window.L_); }; s.onerror = rej; document.head.appendChild(s);
+  });
+}
+async function showRouteMap(list) {
+  const pts = list.map((o, k) => ({ o, k })).filter(x => x.o.lat != null && x.o.lng != null);
+  const miss = list.length - pts.length;
+  $('#mapnote').textContent = miss ? `${miss} زبون بدون موقع — افتح «الزبائن ← تعديل ← 📍 موقعي الحالي» وأنت عند المطعم` : '';
+  const todo = pts.filter(x => x.o.status !== 'delivered');
+  if (todo.length) { const c = x => `${x.o.lat},${x.o.lng}`, last = todo[todo.length - 1], mid = todo.slice(0, -1).slice(0, 9);
+    $('#gdir').innerHTML = `<a class="btn blue block" style="margin-top:8px" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${c(last)}${mid.length ? '&waypoints=' + encodeURIComponent(mid.map(c).join('|')) : ''}">🧭 ابدأ المشوار في خرائط Google</a>`; }
+  if (!pts.length) { $('#map').style.display = 'none'; return; }
+  let Lf; try { Lf = await loadLeaflet(); } catch (e) { $('#map').innerHTML = '<div class="center mut" style="padding:40px 10px">الخريطة بدها إنترنت</div>'; return; }
+  if (!$('#map')) return;
+  const m = Lf.map('map', { zoomControl: true, attributionControl: true });
+  Lf.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
+  const ll = pts.map(x => [x.o.lat, x.o.lng]);
+  pts.forEach(x => Lf.marker([x.o.lat, x.o.lng], { icon: Lf.divIcon({ className: 'pin' + (x.o.status === 'delivered' ? ' done' : ''), html: String(x.k + 1), iconSize: [34, 34] }) }).addTo(m).bindPopup(esc(x.o.restaurant_name)));
+  if (ll.length > 1) Lf.polyline(ll, { color: '#2f6b3a', weight: 4, opacity: .7 }).addTo(m);
+  m.fitBounds(ll, { padding: [30, 30], maxZoom: 15 });
 }
 
 // ================= ورقة اليوم (طباعة/مشاركة) =================
@@ -254,7 +300,7 @@ function expenseForm(e) {
 
 // ================= الزبائن =================
 async function customersView() {
-  const days = Number(sessionStorage.stop_days || 7);
+  const days = Number(sessionStorage.stop_days || (await api('/api/m/settings')).stop_days || 7);
   const [R, St] = await Promise.all([api('/api/m/restaurants'), api('/api/m/stopped?days=' + days)]);
   app.innerHTML = `<button class="btn block" id="radd">➕ زبون جديد</button>
   <h2>⚠️ وقفوا عن الطلب</h2>
@@ -266,24 +312,37 @@ async function customersView() {
      <div class="mut">${r.last_order ? 'آخر طلب: ' + r.last_order : 'لا يوجد طلبات'} • الرصيد: <b class="${r.balance > 0 ? 'pos' : ''}">${sar(r.balance)}</b></div></div></div>
      <div class="row" style="margin-top:8px"><button class="btn sec sm" data-ed="${r.id}">✏️ تعديل</button><button class="btn ${r.active ? 'warn' : ''} sm" data-act="${r.id}" data-v="${r.active ? 0 : 1}">${r.active ? '⏸ إيقاف' : '▶ إعادة تفعيل'}</button><a class="btn sec sm" href="#/statement/${r.id}">📄 كشف</a></div></div>`).join('')}`;
   $('#sd').onchange = () => { sessionStorage.stop_days = $('#sd').value; customersView(); };
-  $('#radd').onclick = () => restaurantForm({ active: 1, pin: String(Math.floor(1000 + Math.random() * 9000)) });
+  $('#radd').onclick = () => restaurantForm({ active: 1 });
   app.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => restaurantForm(R.find(r => r.id == b.dataset.ed)));
   app.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => { await api(`/api/m/restaurants/${b.dataset.act}/active`, { active: b.dataset.v === '1' }); L = await api('/api/m/lookups'); toast('تم ✅'); customersView(); });
 }
 function restaurantForm(r) {
+  r = { ...r };
+  setTimeout(() => { const g = $('#r_gps'); if (g) g.onclick = () => {
+    if (!navigator.geolocation) return toast('الجهاز ما بيدعم تحديد الموقع');
+    $('#r_ll').textContent = '⏳ جاري تحديد الموقع…';
+    navigator.geolocation.getCurrentPosition(p => { r.lat = Math.round(p.coords.latitude * 1e6) / 1e6; r.lng = Math.round(p.coords.longitude * 1e6) / 1e6; $('#r_ll').textContent = '✅ تم أخذ الموقع، اضغط حفظ'; },
+      e => { $('#r_ll').textContent = e.code === 1 ? 'اسمح للتطبيق باستخدام الموقع' : 'ما قدرت أحدد الموقع'; }, { enableHighAccuracy: true, timeout: 20000 });
+  }; }, 0);
   modal(`<h2 style="margin-top:0">${r.id ? 'تعديل زبون' : 'زبون جديد'}</h2>
    <label>اسم المطعم</label><input id="r_n" value="${esc(r.name || '')}">
    <label>رقم الجوال</label><input id="r_p" inputmode="tel" value="${esc(r.phone || '')}">
    <label>العنوان</label><input id="r_a" value="${esc(r.address || '')}">
    <label>رابط الموقع على الخريطة (اختياري)</label><input id="r_m" dir="ltr" value="${esc(r.map_url || '')}" placeholder="https://maps.google.com/...">
-   <label>الرقم السري للمطعم (إذا فعّلت طلب المطاعم)</label><input id="r_pin" inputmode="numeric" value="${esc(r.pin || '')}">
+   <label>الموقع على الخريطة</label><div class="row"><button type="button" class="btn sec sm" id="r_gps">📍 موقعي الحالي</button><span id="r_ll" class="mut" style="flex:2">${r.lat != null ? '✅ الموقع محفوظ' : 'لما تكون عند المطعم اضغط الزر'}</span></div>
    <div style="height:12px"></div><button class="btn block" id="r_s">حفظ</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
-  $('#r_s').onclick = async () => { try { await api('/api/m/restaurants', { id: r.id, name: $('#r_n').value, phone: $('#r_p').value, address: $('#r_a').value, map_url: $('#r_m').value, pin: $('#r_pin').value, active: r.active ? 1 : 0 }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); customersView(); } catch (e) { toast(e.message); } };
+  $('#r_s').onclick = async () => { try { await api('/api/m/restaurants', { id: r.id, name: $('#r_n').value, phone: $('#r_p').value, address: $('#r_a').value, map_url: $('#r_m').value, lat: r.lat, lng: r.lng, active: r.active ? 1 : 0 }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); customersView(); } catch (e) { toast(e.message); } };
 }
 
 // ================= المزيد =================
 async function moreView() {
-  app.innerHTML = `<div style="display:grid;gap:12px">
+  const S = await api('/api/m/settings');
+  app.innerHTML = `<div class="card"><h2 style="margin-top:0">💾 حفظ البيانات</h2>
+   <p class="mut" style="margin-top:0">كل البيانات محفوظة على هذا الجوال فقط. اعمل نسخة احتياطية كل أسبوع واحفظها في «الملفات» أو أرسلها لنفسك على واتساب.</p>
+   <button class="btn block" id="bk" style="min-height:72px;font-size:22px">💾 نسخ احتياطي</button>
+   <button class="btn sec block" id="rs" style="min-height:72px;font-size:22px;margin-top:10px">♻️ استعادة</button>
+   <div class="mut center" style="margin-top:8px">${S.last_backup ? 'آخر نسخة: ' + fmtDate(S.last_backup.slice(0, 10)) : 'لسا ما في نسخة احتياطية'}</div></div>
+  <div style="display:grid;gap:12px">
    <a class="btn block sec" href="#/products">🥬 الأصناف والأسعار والوصفات</a>
    <a class="btn block sec" href="#/ingredients">🧂 المواد الخام وأسعارها</a>
    <a class="btn block sec" href="#/needs/${addDays(L.today, 1)}">📦 المواد المطلوبة لبكرة</a>
@@ -291,6 +350,35 @@ async function moreView() {
    <a class="btn block sec" href="#/print/${dayDate}">🖨️ ورقة اليوم</a>
    <a class="btn block sec" href="#/expenses">🧾 المصاريف</a>
    <a class="btn block sec" href="#/settings">⚙️ الإعدادات</a></div>`;
+  $('#bk').onclick = () => doBackup(moreView); $('#rs').onclick = doRestore;
+}
+
+// ================= نسخ احتياطي واستعادة =================
+// ملف JSON عبر نافذة المشاركة في iPhone (حفظ في الملفات / واتساب)، وإذا ما انفتحت: تنزيل الملف
+async function doBackup(after) {
+  let json; try { json = Store.exportJson(); } catch (e) { return toast(e.message); }
+  const name = `talabiyat-backup-${Store.today()}.json`;
+  const blob = new Blob([json], { type: 'application/json' });
+  let file = null; try { file = new File([blob], name, { type: 'application/json' }); } catch (_) {}
+  let ok = false;
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'نسخة احتياطية - طلبيات' }); ok = true; }
+    catch (e) { if (e && e.name === 'AbortError') return toast('ما تم حفظ النسخة'); }
+  }
+  if (!ok) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); ok = true; }
+  await api('/api/m/backup-done', {}); toast('تم النسخ الاحتياطي ✅'); if (after) after();
+}
+function doRestore() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json,text/plain'; inp.id = 'restore_file'; inp.style.display = 'none';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
+    let d; try { d = JSON.parse(await f.text()); } catch (e) { return toast('الملف مش صحيح'); }
+    if (!d || d.app !== 'talabiyat') return toast('الملف مش نسخة احتياطية من طلبيات');
+    const when = d.exported_at ? fmtDate(String(d.exported_at).slice(0, 10)) : '';
+    if (!confirm(`استعادة النسخة ${when}؟\n(${(d.restaurants || []).length} زبون، ${(d.orders || []).length} طلبية، ${(d.payments || []).length} دفعة)\n\nتنبيه: البيانات الحالية على الجوال رح تنمسح وتنحط مكانها النسخة. الرقم السري الحالي بيضل نفسه.`)) return;
+    try { await api('/api/m/restore', { data: d }); toast('تمت الاستعادة ✅'); setTimeout(() => location.reload(), 600); } catch (e) { toast(e.message); }
+  };
+  document.body.appendChild(inp); inp.click();
 }
 async function productsView() {
   const P = await api('/api/m/recipes');
@@ -368,17 +456,19 @@ function productForm(p) {
 }
 async function settingsView() {
   const S = await api('/api/m/settings');
+  let pers = null; try { pers = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : null; } catch (_) {}
   app.innerHTML = `<div class="card"><label>اسم المعمل (يظهر في الأوراق والكشوفات)</label><input id="s_n" value="${esc(S.factory_name)}">
-   <label style="display:flex;gap:10px;align-items:center;font-size:19px;color:inherit;margin-top:16px"><input type="checkbox" id="s_ro" style="width:28px;height:28px" ${S.restaurant_ordering ? 'checked' : ''}> السماح للمطاعم بالطلب بنفسها (صفحة المطعم)</label>
-   <label>آخر وقت لطلب المطاعم لليوم التالي</label><input id="s_c" type="time" value="${esc(S.cutoff_time)}">
+   <label>تذكير النسخ الاحتياطي</label><select id="s_b">${[[1, 'كل يوم'], [3, 'كل 3 أيام'], [7, 'كل أسبوع'], [0, 'بدون تذكير']].map(([v, t]) => `<option value="${v}" ${Number(S.backup_every) === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+   <label>نبّهني عن الزبون اللي وقف عن الطلب بعد</label><select id="s_d">${[3, 7, 14, 30].map(d => `<option value="${d}" ${Number(S.stop_days) === d ? 'selected' : ''}>${d} أيام</option>`).join('')}</select>
    <div style="height:12px"></div><button class="btn block" id="s_s">حفظ</button></div>
    <div class="card"><h2 style="margin-top:0">🔒 تغيير الرقم السري</h2>
    <label>الرقم السري الحالي</label><input id="pw_c" inputmode="numeric" type="password" autocomplete="current-password">
    <label>الرقم الجديد (4–8 أرقام)</label><input id="pw_n" inputmode="numeric" type="password" autocomplete="new-password">
    <label>أعد كتابة الرقم الجديد</label><input id="pw_n2" inputmode="numeric" type="password" autocomplete="new-password">
    <div style="height:12px"></div><button class="btn block" id="pw_s">تغيير الرقم السري</button></div>
-   <div class="sample">البيانات الموجودة حالياً (المطاعم المكتوب جنبها «تجريبي» والطلبيات والدفعات) هي بيانات تجريبية للتجربة فقط.</div>`;
-  $('#s_s').onclick = async () => { try { await api('/api/m/settings', { factory_name: $('#s_n').value, cutoff_time: $('#s_c').value, restaurant_ordering: $('#s_ro').checked }); toast('تم الحفظ ✅'); } catch (e) { toast(e.message); } };
+   <div class="card mut">📱 البيانات محفوظة على هذا الجوال فقط${pers === true ? ' (محميّة من المسح التلقائي ✅)' : ''}. لو مسحت التطبيق أو بيانات Safari أو غيّرت الجوال، بتحتاج «استعادة» من آخر نسخة احتياطية.
+   ${isStandalone() ? '' : '<br><b>⚠️ أنت فاتح التطبيق من المتصفح مش من أيقونة الشاشة الرئيسية.</b>'}</div>`;
+  $('#s_s').onclick = async () => { try { await api('/api/m/settings', { factory_name: $('#s_n').value, backup_every: Number($('#s_b').value), stop_days: Number($('#s_d').value) }); toast('تم الحفظ ✅'); } catch (e) { toast(e.message); } };
   bindPinChange();
 }
 function bindPinChange() {

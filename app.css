@@ -53,3 +53,11 @@ table{width:100%;border-collapse:collapse;font-size:17px}th,td{padding:8px 6px;b
 .qty4 input{width:100%;flex:none;font-size:26px;padding:8px 4px}
 .warn{background:#fff3cd;color:#7a5a00;border-radius:10px;padding:6px 10px;margin-top:6px;font-size:15px}
 .kv{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px dashed #e5e5e5}
+.warnbox{border:3px solid #d08a00;background:#fff6e0}
+.warnbox p{font-size:18px;margin:6px 0}
+.remind{border:2px solid #d08a00}
+.remind .ritem{padding:6px 0;border-top:1px solid #eee;font-size:17px}
+.remind .ritem:first-of-type{border-top:0}
+.pin{background:#2f6b3a;color:#fff;border-radius:50%;border:3px solid #fff;font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.pin.done{background:#888}
+.leaflet-container{font-family:inherit;direction:ltr}
