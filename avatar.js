@@ -2,6 +2,7 @@
 const AVATAR_NAME = 'أحمد'; // اسم المساعد: غيّره هون فقط
 const AVATAR_IMG = 'icons/avatar-ahmed.jpg';
 const AVATAR_FALLBACK = '🧑‍🍳';
+const AVATAR_FULL = 'icons/ahmed-full.webp'; // صورة كاملة (خلفية شفافة)
 function avatarFace(size = 64, level = 'ok') {
   const ring = level === 'red' ? 'var(--red)' : level === 'yellow' ? '#d08a00' : 'var(--g)';
   return `<span class="av" style="width:${size}px;height:${size}px;border-color:${ring}"><img src="${AVATAR_IMG}" alt="${esc(AVATAR_NAME)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'avfb',textContent:'${AVATAR_FALLBACK}'}))"></span>`;
@@ -10,7 +11,7 @@ const stockAmt = (a, u) => a == null ? '—' : (u === 'كغ' && Math.abs(a) < 1 
 const daysTxt = d => { const n = Math.floor(d); return d <= 0 ? 'خلص!' : n < 1 ? 'أقل من يوم' : n === 1 ? 'حوالي يوم واحد' : n === 2 ? 'حوالي يومين' : `حوالي ${num(n)} ${n <= 10 ? 'أيام' : 'يوم'}`; };
 const alertLine = i => `<div class="avi ${i.level}"><b>${i.level === 'red' ? '🔴' : '🟡'} ${esc(i.name)}</b>: ${i.days_left <= 0 ? 'خلص أو قرّب يخلص — اطلب الآن' : `باقي ${daysTxt(i.days_left)} — يخلص تقريباً ${fmtDate(i.runout)}`}<div class="mut">الموجود تقريباً: ${stockAmt(i.stock, i.unit)}${i.rate ? ` • الصرف اليومي حوالي ${stockAmt(i.rate, i.unit)}` : ''}</div></div>`;
 
-// شريط «أحمد» الثابت تحت الشاشة (فوق شريط التبويبات) — ظاهر دائماً بعد الدخول
+// «أحمد» واقف بزاوية الشاشة تحت (فوق التبويبات) مع فقاعة كلام — ظاهر دائماً بعد الدخول
 let _avOpen = false, _avS = null;
 function avatarSummary(S) {
   if (!S) return { level: 'ok', text: `${AVATAR_NAME} هون 👋` };
@@ -22,23 +23,27 @@ function avatarSummary(S) {
   return { level: 'ok', text: 'المخزون تمام 👍' };
 }
 function renderAvatarBar() {
-  let el = $('#avbar'); if (!el) return;
+  const el = $('#avbar'); if (!el) return;
   const S = _avS, sm = avatarSummary(S);
-  el.className = 'avbar ' + sm.level + (_avOpen ? ' open' : '');
+  el.className = 'avdock ' + sm.level;
   const list = S && S.alerts.length ? S.alerts.map(alertLine).join('') + `<div class="mut" style="margin-top:6px">⚠️ تقدير حسب الاستهلاك في آخر ${S.window_days} يوم (الطلبيات × الوصفات)</div>` : `<div class="avi">${esc(sm.text)}</div>`;
   const notif = ('Notification' in window && Notification.permission === 'default' && S && S.alerts.length) ? '<button class="btn sec sm block" id="av_notif" style="margin-top:8px">🔔 نبّهني بإشعار كمان</button>' : '';
-  el.innerHTML = `<button class="avrow" id="av_tap" aria-expanded="${_avOpen}">${avatarFace(44, sm.level)}<span class="avtxt"><b>${esc(AVATAR_NAME)}</b> <span id="av_msg">${esc(sm.text)}</span></span><span class="avchev">${_avOpen ? '▼' : '▲'}</span></button>
-    ${_avOpen ? `<div class="avpanel">${list}<a class="btn ${sm.level === 'red' ? 'red' : sm.level === 'yellow' ? 'warn' : 'sec'} block" href="#/stock" id="av_go" style="margin-top:10px">📦 المخزون</a>${notif}</div>` : ''}`;
-  $('#av_tap').onclick = () => { _avOpen = !_avOpen; renderAvatarBar(); };
+  el.innerHTML = `<button class="avfig" id="av_tap" aria-expanded="${_avOpen}" aria-label="${esc(AVATAR_NAME)}: ${esc(sm.text)}"><img src="${AVATAR_FULL}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'avfb',textContent:'${AVATAR_FALLBACK}'}))"></button>
+    <button class="avbub" id="av_bub"><b>${esc(AVATAR_NAME)}:</b> <span id="av_msg">${esc(sm.text)}</span></button>
+    ${_avOpen ? `<div class="avpanel ${sm.level}" id="av_panel"><h3>${esc(AVATAR_NAME)} — المخزون</h3>${list}<a class="btn ${sm.level === 'red' ? 'red' : sm.level === 'yellow' ? 'warn' : 'sec'} block" href="#/stock" id="av_go" style="margin-top:10px">📦 افتح المخزون</a>${notif}<button class="btn sec sm block" id="av_close" style="margin-top:8px">إغلاق ✕</button></div>` : ''}`;
+  const tog = () => { _avOpen = !_avOpen; renderAvatarBar(); };
+  $('#av_tap').onclick = tog; $('#av_bub').onclick = tog;
+  const c = $('#av_close'); if (c) c.onclick = tog;
   const g = $('#av_go'); if (g) g.onclick = () => { _avOpen = false; setTimeout(renderAvatarBar, 0); };
   const n = $('#av_notif'); if (n) n.onclick = async () => { try { await Notification.requestPermission(); } catch (_) {} avatarRefresh(); };
   placeAvatarBar();
 }
-// مكان الشريط: فوق شريط التبويبات مباشرة (والـ safe-area محسوبة داخل ارتفاع الشريط)
+// المكان: فوق شريط التبويبات مباشرة (ارتفاع الشريط فيه الـ safe-area)، ومسافة تحت المحتوى حتى ما يغطّي أزرار آخر الصفحة
 function placeAvatarBar() {
   const el = $('#avbar'), nav = $('#nav'); if (!el || !nav) return;
-  el.style.bottom = nav.offsetHeight + 'px';
-  document.body.style.paddingBottom = (nav.offsetHeight + el.offsetHeight + 16) + 'px';
+  const nh = nav.offsetHeight; el.style.bottom = nh + 'px';
+  const p = $('#av_panel'); if (p) p.style.bottom = (nh + el.offsetHeight + 6) + 'px';
+  document.body.style.paddingBottom = (nh + el.offsetHeight + 16) + 'px';
 }
 function showAvatarBar() { const el = $('#avbar'); if (!el) return; el.style.display = ''; renderAvatarBar(); avatarRefresh(); }
 window.addEventListener('resize', placeAvatarBar);
