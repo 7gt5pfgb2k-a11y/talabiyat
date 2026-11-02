@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: talabiyat
+    runtime: node
+    plan: starter
+    region: frankfurt
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATA_DIR
+        value: /var/data
+      - key: MANAGER_PIN
+        sync: false
+    disk:
+      name: talabiyat-data
+      mountPath: /var/data
+      sizeGB: 1

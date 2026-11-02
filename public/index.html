@@ -1,0 +1,7 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#2f6b3a"><link rel="icon" href="/favicon.png"><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="طلبيات"><link rel="stylesheet" href="/app.css"><title>طلبيات</title></head><body>
+<header class="top"><h1 id="fname">طلبيات</h1></header>
+<main>
+<div class="card center"><img src="/icons/icon-192.png" width="96" height="96" alt="" style="border-radius:20px"><h2>أهلاً وسهلاً</h2><p class="mut">اختر طريقة الدخول</p></div>
+<div class="big-choice"><a class="btn block" href="/manager.html">👨‍🍳 دخول المدير</a><a class="btn block sec" id="rbtn" href="/restaurant.html">🍽️ دخول المطعم (لطلب الأكل)</a></div>
+<p class="mut center" style="margin-top:30px">لتثبيت التطبيق: من المتصفح اختر "إضافة إلى الشاشة الرئيسية"</p>
+</main><script src="/common.js"></script><script>api('/api/me').then(m=>{if(!m.restaurant_ordering)$('#rbtn').style.display='none'; if(m.role==='manager')location.replace('/manager.html'); if(m.role==='restaurant'&&m.restaurant_ordering)location.replace('/restaurant.html');}).catch(()=>{})</script></body></html>

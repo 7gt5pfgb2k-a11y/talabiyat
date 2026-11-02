@@ -1,0 +1,22 @@
+{
+  "name": "talabiyat",
+  "version": "1.0.0",
+  "description": "طلبيات — تطبيق طلبيات معمل الأكل (PWA)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "private": true
+}
