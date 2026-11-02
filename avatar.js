@@ -96,3 +96,9 @@ async function _avatarRefresh() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && typeof L !== 'undefined' && L) avatarRefresh(); });
 setInterval(() => { if (typeof L !== 'undefined' && L) avatarRefresh(); }, 30 * 60e3);
+// لما يفتح حقل كتابة تحت (خلف أحمد أو شريط التبويبات) نطلّعه لنص الشاشة
+document.addEventListener('focusin', e => {
+  const t = e.target; if (!t || !/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.closest('.modal')) return;
+  const bar = $('#avbar'), nav = $('#nav'); const top = Math.min(bar && bar.offsetParent !== null ? bar.getBoundingClientRect().top : innerHeight, nav && nav.offsetParent !== null ? nav.getBoundingClientRect().top : innerHeight);
+  if (t.getBoundingClientRect().bottom > top - 8) setTimeout(() => t.scrollIntoView({ block: 'center', behavior: 'auto' }), 50);
+});
