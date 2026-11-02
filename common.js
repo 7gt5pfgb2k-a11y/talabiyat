@@ -13,7 +13,23 @@ function addDays(d, n) { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.ge
 const num = n => (Math.round(Number(n || 0) * 100) / 100).toLocaleString('en-US');
 const sar = n => `${num(n)} ريال`;
 const STATUS = { new: 'جديدة', prepared: 'جاهزة', delivered: 'تم التوصيل', cancelled: 'ملغاة' };
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+// تحديثات أسرع: نفحص النسخة الجديدة عند كل فتح، ولما تجهز نعيد التحميل مرة وحدة (أو نعرض زر تحديث لو في شغل مفتوح)
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
+    const check = () => reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+  }).catch(() => {}));
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || window.__swReloading) return;
+    const busy = ($('#modal') && $('#modal').innerHTML) || ($('#otext') && $('#otext').value.trim()) || document.querySelector('input:focus,textarea:focus');
+    if (!busy && !sessionStorage.getItem('talabiyat_sw_reloaded')) { window.__swReloading = true; sessionStorage.setItem('talabiyat_sw_reloaded', '1'); location.reload(); return; }
+    if ($('#updbar')) return;
+    const b = document.createElement('button'); b.id = 'updbar'; b.className = 'updbar'; b.textContent = '🔄 تحديث جديد، اضغط للتحديث';
+    b.onclick = () => { window.__swReloading = true; location.reload(); }; document.body.appendChild(b);
+  });
+  window.addEventListener('load', () => setTimeout(() => sessionStorage.removeItem('talabiyat_sw_reloaded'), 10000));
+}
 
 // أزرار الكمية: للحبة خطوات كبيرة (±50 و +100)، لغيرها ±1 و +5
 const STEPS = unit => (unit === 'حبة' || unit === 'قطعة') ? [50, 100] : [1, 5];

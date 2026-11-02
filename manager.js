@@ -14,7 +14,7 @@ async function start() {
   $('#logout').style.display = ''; $('#logout').onclick = async () => { await api('/api/logout', {}); location.reload(); };
   $('#nav').style.display = '';
   L = await api('/api/m/lookups'); dayDate = L.today;
-  window.addEventListener('hashchange', route); route(); avatarRefresh();
+  window.addEventListener('hashchange', route); route(); showAvatarBar();
 }
 // أول تشغيل: يختار المدير رقمه السري (لا يوجد رقم افتراضي)
 function setupView() {
@@ -53,9 +53,7 @@ async function dayView() {
   const D = await api('/api/m/day?date=' + dayDate);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const REM = await api('/api/m/reminders').catch(() => []);
-  const AV = await avatarCard();
   app.innerHTML = `${installWarning()}
-  ${AV}
   ${REM.length ? `<div class="card remind"><div style="font-size:19px;font-weight:800;margin-bottom:6px">🔔 تنبيهات</div>${REM.map(r => `<div class="ritem">${r.kind === 'backup' ? '💾' : r.kind === 'supplier' ? '🧾' : r.kind === 'old' ? '🚚' : '📞'} ${esc(r.text)}</div>`).join('')}
     ${REM.some(r => r.kind === 'backup') ? '<button class="btn block" id="bk_now" style="margin-top:10px;min-height:64px">💾 نسخ احتياطي الآن</button>' : ''}</div>` : ''}
   ${L.restaurants.length ? '' : `<div class="card"><b>ابدأ بإضافة زبائنك</b> من تبويب «الزبائن» 🏪، وحدّد سعر الحبة من «المزيد ← الأصناف».<div class="row" style="margin-top:10px"><a class="btn sec sm" href="#/customers">🏪 إضافة زبون</a><button class="btn sec sm" id="rs_first">♻️ استعادة نسخة</button></div></div>`}
@@ -84,7 +82,7 @@ async function dayView() {
        ${o.status !== 'delivered' ? `<button class="btn sec sm" data-edit="${o.restaurant_id}">✏️ تعديل</button>` : `<button class="btn sec sm" data-st="new" data-id="${o.id}">↩ تراجع</button>`}
      </div></div>`).join('')}
   ${D.orders.length ? `<div class="card center"><span class="mut">قيمة طلبيات اليوم:</span> <b class="money">${sar(D.day_total)}</b></div>` : ''}`;
-  bindDateBar('db', dayView); bindAvatarCard();
+  bindDateBar('db', dayView);
   if ($('#bk_now')) $('#bk_now').onclick = () => doBackup(dayView);
   if ($('#rs_first')) $('#rs_first').onclick = doRestore;
   app.querySelectorAll('[data-st]').forEach(b => b.onclick = async () => { await api(`/api/m/orders/${b.dataset.id}/status`, { status: b.dataset.st }); toast('تم ✅'); dayView(); });

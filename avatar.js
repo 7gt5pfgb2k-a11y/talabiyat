@@ -10,22 +10,39 @@ const stockAmt = (a, u) => a == null ? '—' : (u === 'كغ' && Math.abs(a) < 1 
 const daysTxt = d => { const n = Math.floor(d); return d <= 0 ? 'خلص!' : n < 1 ? 'أقل من يوم' : n === 1 ? 'حوالي يوم واحد' : n === 2 ? 'حوالي يومين' : `حوالي ${num(n)} ${n <= 10 ? 'أيام' : 'يوم'}`; };
 const alertLine = i => `<div class="avi ${i.level}"><b>${i.level === 'red' ? '🔴' : '🟡'} ${esc(i.name)}</b>: ${i.days_left <= 0 ? 'خلص أو قرّب يخلص — اطلب الآن' : `باقي ${daysTxt(i.days_left)} — يخلص تقريباً ${fmtDate(i.runout)}`}<div class="mut">الموجود تقريباً: ${stockAmt(i.stock, i.unit)}${i.rate ? ` • الصرف اليومي حوالي ${stockAmt(i.rate, i.unit)}` : ''}</div></div>`;
 
-// بطاقة الشاشة الرئيسية: تنبيهات فقط، وسطر واحد لما كل شي تمام
-async function avatarCard() {
-  let S; try { S = await api('/api/m/stock'); } catch (_) { return ''; }
-  const worst = S.alerts.some(i => i.level === 'red') ? 'red' : S.alerts.length ? 'yellow' : 'ok';
-  const head = msg => `<div class="avh">${avatarFace(60, worst)}<div><div class="avn">${esc(AVATAR_NAME)}</div><div class="avm">${msg}</div></div></div>`;
-  const note = `<div class="mut" style="margin-top:6px">⚠️ تقدير حسب الاستهلاك في آخر ${S.window_days} يوم (الطلبيات × الوصفات)</div>`;
-  const notif = ('Notification' in window && Notification.permission === 'default' && S.alerts.length) ? '<button class="btn sec sm block" id="av_notif" style="margin-top:8px">🔔 نبّهني بإشعار كمان</button>' : '';
-  if (S.alerts.length) return `<div class="card avcard ${worst}" id="avatar">${head(`في ${S.alerts.length} ${S.alerts.length > 2 && S.alerts.length < 11 ? 'مواد' : 'مادة'} قرّبت تخلص`)}${S.alerts.map(alertLine).join('')}${note}
-    <a class="btn ${worst === 'red' ? 'red' : 'warn'} block" href="#/stock" style="margin-top:10px">📦 المخزون</a>${notif}</div>`;
-  if (!S.items.length) return '';
-  if (!S.tracked) return `<div class="card avcard" id="avatar">${head('دخّل الكمية الموجودة عندك من كل مادة، وأنا بقلك قبل ما تخلص 👍')}<a class="btn sec block" href="#/stock" style="margin-top:10px">📦 إدخال المخزون</a></div>`;
-  const tracked = S.items.filter(i => i.stock != null);
-  const msg = tracked.some(i => i.level === 'ok') ? 'المخزون تمام 👍' : S.window_days < S.min_days ? `لسا بجمع بيانات الاستهلاك (${S.window_days} من ${S.min_days} أيام)` : 'المخزون مسجّل، بس ما في استهلاك كافي للحساب';
-  return `<a class="card avcard ok" id="avatar" href="#/stock" style="display:block;text-decoration:none;color:inherit">${head(msg)}</a>`;
+// شريط «أحمد» الثابت تحت الشاشة (فوق شريط التبويبات) — ظاهر دائماً بعد الدخول
+let _avOpen = false, _avS = null;
+function avatarSummary(S) {
+  if (!S) return { level: 'ok', text: `${AVATAR_NAME} هون 👋` };
+  const top = S.alerts[0];
+  if (top) return { level: top.level, text: `${top.level === 'red' ? '🔴' : '🟡'} ${top.name}: ${top.days_left <= 0 ? 'خلص!' : 'باقي ' + daysTxt(top.days_left)}${S.alerts.length > 1 ? ` (+${S.alerts.length - 1})` : ''}` };
+  if (!S.items.length) return { level: 'ok', text: 'أضف المواد الخام لأراقب المخزون' };
+  if (!S.tracked) return { level: 'ok', text: 'دخّل كمية المخزون لأنبّهك قبل ما يخلص' };
+  if (S.window_days < S.min_days) return { level: 'ok', text: `لسا بجمع بيانات الاستهلاك (${S.window_days}/${S.min_days} أيام)` };
+  return { level: 'ok', text: 'المخزون تمام 👍' };
 }
-function bindAvatarCard() { const b = $('#av_notif'); if (b) b.onclick = async () => { try { await Notification.requestPermission(); } catch (_) {} b.remove(); avatarRefresh(); }; }
+function renderAvatarBar() {
+  let el = $('#avbar'); if (!el) return;
+  const S = _avS, sm = avatarSummary(S);
+  el.className = 'avbar ' + sm.level + (_avOpen ? ' open' : '');
+  const list = S && S.alerts.length ? S.alerts.map(alertLine).join('') + `<div class="mut" style="margin-top:6px">⚠️ تقدير حسب الاستهلاك في آخر ${S.window_days} يوم (الطلبيات × الوصفات)</div>` : `<div class="avi">${esc(sm.text)}</div>`;
+  const notif = ('Notification' in window && Notification.permission === 'default' && S && S.alerts.length) ? '<button class="btn sec sm block" id="av_notif" style="margin-top:8px">🔔 نبّهني بإشعار كمان</button>' : '';
+  el.innerHTML = `<button class="avrow" id="av_tap" aria-expanded="${_avOpen}">${avatarFace(44, sm.level)}<span class="avtxt"><b>${esc(AVATAR_NAME)}</b> <span id="av_msg">${esc(sm.text)}</span></span><span class="avchev">${_avOpen ? '▼' : '▲'}</span></button>
+    ${_avOpen ? `<div class="avpanel">${list}<a class="btn ${sm.level === 'red' ? 'red' : sm.level === 'yellow' ? 'warn' : 'sec'} block" href="#/stock" id="av_go" style="margin-top:10px">📦 المخزون</a>${notif}</div>` : ''}`;
+  $('#av_tap').onclick = () => { _avOpen = !_avOpen; renderAvatarBar(); };
+  const g = $('#av_go'); if (g) g.onclick = () => { _avOpen = false; setTimeout(renderAvatarBar, 0); };
+  const n = $('#av_notif'); if (n) n.onclick = async () => { try { await Notification.requestPermission(); } catch (_) {} avatarRefresh(); };
+  placeAvatarBar();
+}
+// مكان الشريط: فوق شريط التبويبات مباشرة (والـ safe-area محسوبة داخل ارتفاع الشريط)
+function placeAvatarBar() {
+  const el = $('#avbar'), nav = $('#nav'); if (!el || !nav) return;
+  el.style.bottom = nav.offsetHeight + 'px';
+  document.body.style.paddingBottom = (nav.offsetHeight + el.offsetHeight + 16) + 'px';
+}
+function showAvatarBar() { const el = $('#avbar'); if (!el) return; el.style.display = ''; renderAvatarBar(); avatarRefresh(); }
+window.addEventListener('resize', placeAvatarBar);
+window.addEventListener('hashchange', () => { if (_avOpen) { _avOpen = false; renderAvatarBar(); } });
 
 // شاشة المخزون
 async function stockView() {
@@ -55,6 +72,7 @@ let _avT = null;
 function avatarRefresh() { clearTimeout(_avT); _avT = setTimeout(_avatarRefresh, 150); }
 async function _avatarRefresh() {
   let S; try { S = await api('/api/m/stock'); } catch (_) { return; }
+  _avS = S; renderAvatarBar();
   const red = S.alerts.filter(i => i.level === 'red'), n = S.alerts.length;
   const a = document.querySelector('#nav a[data-t="day"]');
   if (a) { let bd = a.querySelector('.nbadge'); if (!bd) { bd = document.createElement('span'); bd.className = 'nbadge'; bd.id = 'av_badge'; a.appendChild(bd); }
