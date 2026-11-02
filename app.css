@@ -149,3 +149,9 @@ th{background:var(--g2)}
 .hlp-pulse{outline:4px solid #d08a00!important;outline-offset:3px;animation:hlpp 1s ease-in-out 3}
 @keyframes hlpp{50%{outline-color:transparent}}
 @media (prefers-reduced-motion:reduce){.hlp-pulse{animation:none}}
+/* موقع الزبون */
+.locbox{margin-top:14px;background:#fff;border:2px solid #dfe8d3;border-radius:16px;padding:12px}
+.locbox h3{margin:0 0 6px;font-size:20px;color:var(--g)}.locbox h3 small{font-size:15px;color:var(--mut);font-weight:400}
+.locst{font-size:17px;margin-bottom:10px;line-height:1.5}.locbox .grid2 .btn{min-height:60px;font-size:18px}
+.pickmap{height:280px;border-radius:12px;margin-top:10px;background:#e8e8e8}.noloc{color:#a0522d;font-weight:700}
+#map,.pickmap{isolation:isolate;z-index:0;position:relative}

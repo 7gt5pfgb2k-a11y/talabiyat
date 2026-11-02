@@ -162,7 +162,7 @@ async function routeView() {
   const left = list.filter(o => o.status !== 'delivered').length;
   app.innerHTML = `${dateBar(D.date, 'rb')}
   ${list.length ? `<div class="card" id="mapcard"><div id="map" style="height:300px;border-radius:12px;background:#e8e8e8"></div><div id="mapnote" class="mut" style="margin-top:6px"></div><div id="gdir"></div></div>` : ''}
-  <div class="card center" style="font-size:20px">${list.length ? (left ? `باقي <b>${left}</b> من ${list.length} توصيلات` : '✅ تم توصيل كل الطلبيات') : 'لا يوجد توصيلات لهذا اليوم'}</div>
+  <div class="card center" style="font-size:20px">${list.length ? (left ? `باقي <b>${left}</b> من ${list.length} توصيلات` : '✅ تم توصيل كل الطلبيات') : 'لا يوجد توصيلات لهذا اليوم<div class="mut" style="font-size:17px;margin-top:6px">الخريطة وترتيب المشوار بيطلعوا هون لما يكون في طلبيات بهاليوم. غيّر التاريخ من فوق أو سجّل طلبية.</div>'}</div>
   ${list.map((o, k) => `<div class="card" style="${o.status === 'delivered' ? 'opacity:.6' : ''}">
     <div class="row"><b style="font-size:24px;flex:0 0 44px;color:var(--g)">${k + 1}.</b><div style="flex:5"><b style="font-size:21px">${esc(o.restaurant_name)}</b><div class="mut">${esc(o.address || '')}</div></div>
       <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:4px"><button class="btn sec sm" data-mv="-1" data-k="${k}" ${k === 0 ? 'disabled' : ''}>▲</button><button class="btn sec sm" data-mv="1" data-k="${k}" ${k === list.length - 1 ? 'disabled' : ''}>▼</button></div></div>
@@ -195,11 +195,14 @@ function loadLeaflet() {
 async function showRouteMap(list) {
   const pts = list.map((o, k) => ({ o, k })).filter(x => x.o.lat != null && x.o.lng != null);
   const miss = list.length - pts.length;
-  $('#mapnote').textContent = miss ? `${miss} زبون بدون موقع — افتح «الزبائن ← تعديل ← 📍 موقعي الحالي» وأنت عند المطعم` : '';
+  $('#mapnote').textContent = miss ? `${miss} زبون بدون موقع (مش على الخريطة) — من «الزبائن» اضغط «✏️ تعديل» ثم «📍 موقعي الحالي» أو «🗺️ اختر على الخريطة»` : '';
   const todo = pts.filter(x => x.o.status !== 'delivered');
   if (todo.length) { const c = x => `${x.o.lat},${x.o.lng}`, last = todo[todo.length - 1], mid = todo.slice(0, -1).slice(0, 9);
     $('#gdir').innerHTML = `<a class="btn blue block" style="margin-top:8px" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${c(last)}${mid.length ? '&waypoints=' + encodeURIComponent(mid.map(c).join('|')) : ''}">🧭 ابدأ المشوار في خرائط Google</a>`; }
-  if (!pts.length) { $('#map').style.display = 'none'; return; }
+  if (todo.length >= 2) $('#gdir').insertAdjacentHTML('afterbegin', '<button class="btn block" id="ropt" style="margin-top:8px">✨ رتّب المشوار تلقائياً (الأقرب فالأقرب)</button>');
+  const ro = $('#ropt'); if (ro) ro.onclick = () => optimizeRoute(list);
+  if (miss) $('#mapnote').insertAdjacentHTML('beforeend', ' <a class="btn sec sm" href="#/customers" style="margin-top:6px">📍 أضف المواقع</a>');
+  if (!pts.length) { $('#map').style.display = 'none'; $('#mapnote').insertAdjacentHTML('afterbegin', '<b>🗺️ الخريطة بتطلع لما يكون للزبائن مواقع محفوظة.</b><br>'); return; }
   let Lf; try { Lf = await loadLeaflet(); } catch (e) { $('#map').innerHTML = '<div class="center mut" style="padding:40px 10px">الخريطة بدها إنترنت</div>'; return; }
   if (!$('#map')) return;
   const m = Lf.map('map', { zoomControl: true, attributionControl: true });
@@ -208,6 +211,27 @@ async function showRouteMap(list) {
   pts.forEach(x => Lf.marker([x.o.lat, x.o.lng], { icon: Lf.divIcon({ className: 'pin' + (x.o.status === 'delivered' ? ' done' : ''), html: String(x.k + 1), iconSize: [34, 34] }) }).addTo(m).bindPopup(esc(x.o.restaurant_name)));
   if (ll.length > 1) Lf.polyline(ll, { color: '#2f6b3a', weight: 4, opacity: .7 }).addTo(m);
   m.fitBounds(ll, { padding: [30, 30], maxZoom: 15 });
+}
+
+// ترتيب تلقائي: من موقعك الحالي (أو أول محطة) للأقرب فالأقرب + تحسين 2-opt. بدون إنترنت وبدون أي خدمة.
+const kmBetween = (a, b) => { const R = 6371, t = x => x * Math.PI / 180, dLa = t(b[0] - a[0]), dLo = t(b[1] - a[1]); const h = Math.sin(dLa / 2) ** 2 + Math.cos(t(a[0])) * Math.cos(t(b[0])) * Math.sin(dLo / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+function orderStops(start, stops) {   // stops: [{ll:[lat,lng], ...}] → مرتّبة
+  const left = stops.slice(), out = []; let cur = start || (left[0] && left[0].ll);
+  while (left.length) { let bi = 0; left.forEach((s, i) => { if (kmBetween(cur, s.ll) < kmBetween(cur, left[bi].ll)) bi = i; }); cur = left[bi].ll; out.push(left.splice(bi, 1)[0]); }
+  const len = a => a.reduce((d, s, i) => d + kmBetween(i ? a[i - 1].ll : (start || a[0].ll), s.ll), 0);
+  for (let imp = true, g = 0; imp && g < 50; g++) { imp = false;
+    for (let i = 0; i < out.length - 1; i++) for (let j = i + 1; j < out.length; j++) { const c = out.slice(0, i).concat(out.slice(i, j + 1).reverse(), out.slice(j + 1)); if (len(c) + 1e-9 < len(out)) { out.splice(0, out.length, ...c); imp = true; } } }
+  return out;
+}
+async function optimizeRoute(list) {
+  const b = $('#ropt'); if (b) { b.disabled = true; b.textContent = '⏳ جاري الترتيب…'; }
+  const here = await new Promise(res => { if (!navigator.geolocation) return res(null); navigator.geolocation.getCurrentPosition(p => res([p.coords.latitude, p.coords.longitude]), () => res(null), { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }); });
+  const done = list.filter(o => o.status === 'delivered'), todo = list.filter(o => o.status !== 'delivered');
+  const withLL = todo.filter(o => o.lat != null && o.lng != null).map(o => ({ o, ll: [o.lat, o.lng] })), noLL = todo.filter(o => o.lat == null || o.lng == null);
+  const seq = [...done, ...orderStops(here, withLL).map(x => x.o), ...noLL].map(o => o.restaurant_id);
+  const ids = [...seq, ...L.restaurants.map(r => r.id).filter(id => !seq.includes(id))];
+  await api('/api/m/route', { ids }); L = await api('/api/m/lookups');
+  toast(here ? 'تم الترتيب من موقعك الحالي ✅ — بتقدر تعدّل بالأسهم ▲▼' : 'تم الترتيب ✅ (بدون موقعك الحالي، من أول محطة) — بتقدر تعدّل بالأسهم ▲▼'); routeView();
 }
 
 // ================= ورقة اليوم (طباعة/مشاركة) =================
@@ -309,6 +333,7 @@ function expenseForm(e) {
 async function customersView() {
   const days = Number(sessionStorage.stop_days || (await api('/api/m/settings')).stop_days || 7);
   const [R, St] = await Promise.all([api('/api/m/restaurants'), api('/api/m/stopped?days=' + days)]);
+  window._custLL = R.filter(r => r.lat != null && r.lng != null).map(r => [r.lat, r.lng]);
   app.innerHTML = `<button class="btn block" id="radd">➕ زبون جديد</button>
   <h2>⚠️ وقفوا عن الطلب</h2>
   <div class="card"><div class="row"><span>بدون طلب من</span><select id="sd" style="flex:0 0 110px">${[3, 7, 14, 30].map(d => `<option value="${d}" ${d === days ? 'selected' : ''}>${d} أيام</option>`).join('')}</select></div>
@@ -316,6 +341,7 @@ async function customersView() {
   <h2>كل الزبائن (${R.length})</h2>
   ${R.map(r => `<div class="card" style="${r.active ? '' : 'opacity:.7'}"><div class="row"><div><b style="font-size:21px">${esc(r.name)}</b> ${r.active ? '' : '<span class="badge st-paused">موقوف</span>'}
      <div class="mut">${esc(r.phone || '')} ${r.address ? '• ' + esc(r.address) : ''}</div>
+     <div class="mut">${r.lat != null ? '📍 الموقع محفوظ' : '<span class="noloc">⚠️ بدون موقع — اضغط «✏️ تعديل»</span>'}</div>
      <div class="mut">${r.last_order ? 'آخر طلب: ' + r.last_order : 'لا يوجد طلبات'} • الرصيد: <b class="${r.balance > 0 ? 'pos' : ''}">${sar(r.balance)}</b></div></div></div>
      <div class="row" style="margin-top:8px"><button class="btn sec sm" data-ed="${r.id}">✏️ تعديل</button><button class="btn ${r.active ? 'warn' : ''} sm" data-act="${r.id}" data-v="${r.active ? 0 : 1}">${r.active ? '⏸ إيقاف' : '▶ إعادة تفعيل'}</button><a class="btn sec sm" href="#/statement/${r.id}">📄 كشف</a></div></div>`).join('')}`;
   $('#sd').onchange = () => { sessionStorage.stop_days = $('#sd').value; customersView(); };
@@ -324,22 +350,49 @@ async function customersView() {
   app.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => { const r = R.find(x => x.id == b.dataset.act) || {}; if (b.dataset.v === '0' && !await ask({ title: 'متأكد بدك توقف الزبون؟', name: r.name, msg: 'ما رح يطلع بالطلبيات الجديدة. حساباته بتضل، وبتقدر ترجّعه بأي وقت.', yes: 'نعم، أوقفه' })) return; await api(`/api/m/restaurants/${b.dataset.act}/active`, { active: b.dataset.v === '1' }); L = await api('/api/m/lookups'); toast('تم ✅'); customersView(); });
 }
 function restaurantForm(r) {
-  r = { ...r };
-  setTimeout(() => { const g = $('#r_gps'); if (g) g.onclick = () => {
-    if (!navigator.geolocation) return toast('الجهاز ما بيدعم تحديد الموقع');
-    $('#r_ll').textContent = '⏳ جاري تحديد الموقع…';
-    navigator.geolocation.getCurrentPosition(p => { r.lat = Math.round(p.coords.latitude * 1e6) / 1e6; r.lng = Math.round(p.coords.longitude * 1e6) / 1e6; $('#r_ll').textContent = '✅ تم أخذ الموقع، اضغط حفظ'; },
-      e => { $('#r_ll').textContent = e.code === 1 ? 'اسمح للتطبيق باستخدام الموقع' : 'ما قدرت أحدد الموقع'; }, { enableHighAccuracy: true, timeout: 20000 });
-  }; }, 0);
+  r = { ...r }; let picked = false, pm = null, pk = null;
+  const has = () => r.lat != null && r.lng != null;
+  const llText = () => has() ? `✅ الموقع محفوظ (${r.lat.toFixed(4)}, ${r.lng.toFixed(4)})` : '⚠️ ما في موقع — المطعم ما رح يطلع على خريطة التوصيل';
+  const setLL = (lat, lng, how) => { r.lat = Math.round(lat * 1e6) / 1e6; r.lng = Math.round(lng * 1e6) / 1e6; picked = true; $('#r_ll').textContent = `✅ ${how} — اضغط «حفظ»`; if (pk) pk.setLatLng([r.lat, r.lng]); };
   modal(`<h2 style="margin-top:0">${r.id ? 'تعديل زبون' : 'زبون جديد'}</h2>
    <label>اسم المطعم</label><input id="r_n" value="${esc(r.name || '')}">
    <label>رقم الجوال</label><input id="r_p" inputmode="tel" value="${esc(r.phone || '')}">
    <label>العنوان</label><input id="r_a" value="${esc(r.address || '')}">
-   <label>رابط الموقع على الخريطة (اختياري)</label><input id="r_m" dir="ltr" value="${esc(r.map_url || '')}" placeholder="https://maps.google.com/...">
-   <label>الموقع على الخريطة</label><div class="row"><button type="button" class="btn sec sm" id="r_gps">📍 موقعي الحالي</button><span id="r_ll" class="mut" style="flex:2">${r.lat != null ? '✅ الموقع محفوظ' : 'لما تكون عند المطعم اضغط الزر'}</span></div>
+   <div class="locbox"><h3>📍 موقع المطعم <small>(للخريطة وترتيب المشوار)</small></h3>
+    <div id="r_ll" class="locst">${esc(llText())}</div>
+    <div class="grid2"><button type="button" class="btn sec" id="r_gps">📍 موقعي الحالي</button><button type="button" class="btn sec" id="r_pick">🗺️ اختر على الخريطة</button></div>
+    <div id="r_map" class="pickmap" hidden></div>
+    <label>أو الصق رابط الموقع (خرائط Google / Apple)</label><input id="r_m" dir="ltr" value="${esc(r.map_url || '')}" placeholder="https://maps.google.com/...">
+    <div id="r_lh" class="mut"></div></div>
    <div style="height:12px"></div><button class="btn block" id="r_s">حفظ</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
-  $('#r_s').onclick = async () => { try { await api('/api/m/restaurants', { id: r.id, name: $('#r_n').value, phone: $('#r_p').value, address: $('#r_a').value, map_url: $('#r_m').value, lat: r.lat, lng: r.lng, active: r.active ? 1 : 0 }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); customersView(); } catch (e) { toast(e.message); } };
+  $('#r_gps').onclick = () => {
+    if (!navigator.geolocation) return toast('الجهاز ما بيدعم تحديد الموقع');
+    $('#r_ll').textContent = '⏳ جاري تحديد الموقع…';
+    navigator.geolocation.getCurrentPosition(p => setLL(p.coords.latitude, p.coords.longitude, 'تم أخذ موقعك الحالي'),
+      e => { $('#r_ll').textContent = e.code === 1 ? '⚠️ اسمح للتطبيق باستخدام الموقع من إعدادات الآيفون (الخصوصية ← خدمات الموقع ← Safari)' : '⚠️ ما قدرت أحدد الموقع — جرّب «اختر على الخريطة»'; }, { enableHighAccuracy: true, timeout: 20000 });
+  };
+  $('#r_pick').onclick = async () => {
+    const box = $('#r_map'); box.hidden = false; box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (pm) return; let Lf; try { Lf = await loadLeaflet(); } catch (e) { box.innerHTML = '<div class="center mut" style="padding:40px 10px">الخريطة بدها إنترنت</div>'; return; }
+    if (!$('#r_map')) return;
+    const c = has() ? [r.lat, r.lng] : mapCenterGuess();
+    pm = Lf.map('r_map', { zoomControl: true }).setView(c, has() ? 16 : 12);
+    Lf.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(pm);
+    if (has()) pk = Lf.marker([r.lat, r.lng], { icon: Lf.divIcon({ className: 'pin', html: '📍', iconSize: [34, 34] }) }).addTo(pm);
+    $('#r_ll').textContent = '👆 اضغط على مكان المطعم بالخريطة';
+    pm.on('click', ev => { if (!pk) pk = Lf.marker(ev.latlng, { icon: Lf.divIcon({ className: 'pin', html: '📍', iconSize: [34, 34] }) }).addTo(pm); setLL(ev.latlng.lat, ev.latlng.lng, 'تم تحديد الموقع على الخريطة'); });
+  };
+  const hint = () => { const v = $('#r_m').value.trim(), c = Store.coordsFrom(v);
+    $('#r_lh').textContent = !v ? '' : !/^https?:\/\//i.test(v) ? '⚠️ الرابط لازم يبدأ بـ https://' : c ? '✅ الرابط فيه الموقع — بينحط على الخريطة بعد الحفظ'
+      : 'ℹ️ هذا الرابط ما فيه إحداثيات (مثل روابط maps.app.goo.gl المختصرة): زر «🗺️ الخريطة» بيفتحه، بس عشان يطلع على خريطة التوصيل اضغط «اختر على الخريطة» أو «موقعي الحالي».'; };
+  $('#r_m').oninput = hint; hint();
+  $('#r_s').onclick = async () => { try {
+    const body = { id: r.id, name: $('#r_n').value, phone: $('#r_p').value, address: $('#r_a').value, map_url: $('#r_m').value, active: r.active ? 1 : 0 };
+    if (picked) { body.lat = r.lat; body.lng = r.lng; }   // وإلا: الرابط الجديد (لو فيه إحداثيات) أو الموقع القديم بيضل
+    await api('/api/m/restaurants', body); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); customersView(); } catch (e) { toast(e.message); } };
 }
+// مركز الخريطة لما ما في موقع: متوسط مواقع الزبائن، وإلا الرياض
+function mapCenterGuess() { const c = (window._custLL || []); if (!c.length) return [24.7136, 46.6753]; return [c.reduce((s, x) => s + x[0], 0) / c.length, c.reduce((s, x) => s + x[1], 0) / c.length]; }
 
 // ================= المزيد =================
 async function moreView() {
