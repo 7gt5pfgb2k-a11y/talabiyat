@@ -2,7 +2,7 @@ const app = $('#app');
 let L = null; // lookups: products, restaurants, today
 let dayDate = null;
 const modal = html => { $('#modal').innerHTML = html ? `<div class="modal"><div class="sheet">${html}</div></div>` : ''; };
-const mapLink = r => r.map_url ? r.map_url : r.lat != null ? `https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lng}` : (r.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}` : '');
+const mapLink = r => /^https?:\/\//i.test(r.map_url || '') ? r.map_url : r.lat != null ? `https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lng}` : (r.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}` : '');
 const telLink = p => p ? `tel:${String(p).replace(/[^\d+]/g, '')}` : '';
 const waShare = text => `https://wa.me/?text=${encodeURIComponent(text)}`;
 
@@ -209,7 +209,7 @@ async function printView(date) {
   const st = await api('/api/m/settings');
   const list = D.orders.filter(o => o.status !== 'cancelled');
   const text = `*${st.factory_name}* — طلبيات ${fmtDate(D.date)}\n\n*المطلوب تحضيره:*\n${D.totals.map(t => `• ${t.name}: ${num(t.qty)} ${t.unit}`).join('\n')}\n\n*التوصيل:*\n${list.map((o, k) => `${k + 1}. ${o.restaurant_name}${o.phone ? ' (' + o.phone + ')' : ''}\n   ${o.items.map(i => `${i.name} ${num(i.qty)} ${i.unit}`).join('، ')}${o.note ? '\n   ملاحظة: ' + o.note : ''}`).join('\n')}`;
-  app.innerHTML = `<div class="row no-print" style="margin-bottom:12px"><button class="btn" onclick="print()">🖨️ طباعة</button><a class="btn sec" target="_blank" rel="noopener" href="${waShare(text)}">📤 واتساب</a>${navigator.share ? '<button class="btn blue" id="share">مشاركة</button>' : ''}</div>
+  app.innerHTML = `<div class="row no-print" style="margin-bottom:12px"><button class="btn" data-print>🖨️ طباعة</button><a class="btn sec" target="_blank" rel="noopener" href="${waShare(text)}">📤 واتساب</a>${navigator.share ? '<button class="btn blue" id="share">مشاركة</button>' : ''}</div>
   <div class="card"><h2 style="margin-top:0">${esc(st.factory_name)}</h2><div style="font-size:20px">ورقة التحضير والتوصيل — <b>${fmtDate(D.date)}</b></div></div>
   <div class="card"><h2 style="margin-top:0">المطلوب تحضيره</h2><table><tr><th>الصنف</th><th>الكمية</th></tr>${D.totals.map(t => `<tr><td>${esc(t.name)}</td><td><b>${num(t.qty)} ${esc(t.unit)}</b></td></tr>`).join('')}</table></div>
   <div class="card"><h2 style="margin-top:0">خط التوصيل</h2><table><tr><th>#</th><th>المطعم</th><th>الطلب</th><th>✔</th></tr>
@@ -251,7 +251,7 @@ function paymentForm(rid) {
    <label>الطريقة</label><div class="row"><button class="btn sm" data-m="نقدي">نقدي</button><button class="btn sec sm" data-m="تحويل">تحويل</button></div>
    <label>التاريخ</label><input id="p_d" type="date" value="${L.today}">
    <label>ملاحظة</label><input id="p_n">
-   <div style="height:12px"></div><button class="btn block" id="p_s">حفظ</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
+   <div style="height:12px"></div><button class="btn block" id="p_s">حفظ</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
   let method = 'نقدي';
   document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { method = b.dataset.m; document.querySelectorAll('[data-m]').forEach(x => x.className = 'btn sm ' + (x === b ? '' : 'sec')); });
   $('#p_s').onclick = async () => { if (!$('#p_r').value) return toast('اختر المطعم'); try { await api('/api/m/finance/payments', { restaurant_id: $('#p_r').value, amount: $('#p_a').value, method, date: $('#p_d').value, note: $('#p_n').value }); modal(''); toast('تم تسجيل الدفعة ✅'); route(); } catch (e) { toast(e.message); } };
@@ -261,7 +261,7 @@ async function statementView(rid) {
   const S = await api(`/api/m/finance/statement?restaurant_id=${rid}&from=${from}&to=${to}`);
   const text = `*${S.factory_name}* — كشف حساب\n${S.restaurant.name}\nمن ${S.from} إلى ${S.to}\n\nرصيد سابق: ${num(S.opening)} ريال\n${S.lines.map(l => `${l.date} | ${l.kind === 'order' ? 'طلبية ' + num(l.debit) : 'دفعة ' + num(l.credit)} | الرصيد ${num(l.balance)}`).join('\n')}\n\n*المبلغ المستحق: ${num(S.closing)} ريال*`;
   app.innerHTML = `<div class="no-print"><div class="grid2"><div><label>من</label><input type="date" id="sf" value="${S.from}"></div><div><label>إلى</label><input type="date" id="stt" value="${S.to}"></div></div>
-   <div class="row" style="margin:12px 0"><button class="btn" onclick="print()">🖨️ طباعة</button><a class="btn sec" target="_blank" rel="noopener" href="${waShare(text)}">📤 واتساب</a><button class="btn warn" id="spay">💵 دفعة</button></div></div>
+   <div class="row" style="margin:12px 0"><button class="btn" data-print>🖨️ طباعة</button><a class="btn sec" target="_blank" rel="noopener" href="${waShare(text)}">📤 واتساب</a><button class="btn warn" id="spay">💵 دفعة</button></div></div>
   <div class="card"><h2 style="margin-top:0">كشف حساب — ${esc(S.restaurant.name)}</h2><div class="mut">${esc(S.factory_name)} • من ${fmtDate(S.from)} إلى ${fmtDate(S.to)}</div></div>
   <div class="card"><table><tr><th>التاريخ</th><th>البيان</th><th>عليه</th><th>دفع</th><th>الرصيد</th></tr>
    <tr><td colspan="4">رصيد سابق</td><td><b>${num(S.opening)}</b></td></tr>
@@ -293,7 +293,7 @@ function expenseForm(e) {
    <label>ملاحظة</label><input id="e_n" value="${esc(e.note || '')}">
    <div style="height:12px"></div><button class="btn block" id="e_save">حفظ</button>
    ${e.id ? '<button class="btn red block" style="margin-top:8px" id="e_del">حذف</button>' : ''}
-   <button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
+   <button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
   $('#e_save').onclick = async () => { try { await api('/api/m/finance/expenses', { id: e.id, category: $('#e_c').value, amount: $('#e_a').value, date: $('#e_d').value, supplier: $('#e_s').value, paid: !$('#e_p').checked, note: $('#e_n').value }); modal(''); toast('تم الحفظ ✅'); expensesView(); } catch (x) { toast(x.message); } };
   if (e.id) $('#e_del').onclick = async () => { if (!confirm('حذف المصروف؟')) return; await api('/api/m/finance/expenses/' + e.id, null, 'DELETE'); modal(''); expensesView(); };
 }
@@ -330,7 +330,7 @@ function restaurantForm(r) {
    <label>العنوان</label><input id="r_a" value="${esc(r.address || '')}">
    <label>رابط الموقع على الخريطة (اختياري)</label><input id="r_m" dir="ltr" value="${esc(r.map_url || '')}" placeholder="https://maps.google.com/...">
    <label>الموقع على الخريطة</label><div class="row"><button type="button" class="btn sec sm" id="r_gps">📍 موقعي الحالي</button><span id="r_ll" class="mut" style="flex:2">${r.lat != null ? '✅ الموقع محفوظ' : 'لما تكون عند المطعم اضغط الزر'}</span></div>
-   <div style="height:12px"></div><button class="btn block" id="r_s">حفظ</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
+   <div style="height:12px"></div><button class="btn block" id="r_s">حفظ</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
   $('#r_s').onclick = async () => { try { await api('/api/m/restaurants', { id: r.id, name: $('#r_n').value, phone: $('#r_p').value, address: $('#r_a').value, map_url: $('#r_m').value, lat: r.lat, lng: r.lng, active: r.active ? 1 : 0 }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); customersView(); } catch (e) { toast(e.message); } };
 }
 
@@ -403,7 +403,7 @@ async function recipeForm(p) {
      ${lines.map((l, k) => `<div class="row" style="margin-top:10px;gap:6px"><select data-i="${k}" style="flex:2">${ING.map(i => `<option value="${i.id}" ${i.id == l.ingredient_id ? 'selected' : ''}>${esc(i.name)}</option>`).join('')}</select>
        <input data-q="${k}" inputmode="decimal" value="${l.qty}" style="flex:1;text-align:center"><select data-u="${k}" style="flex:1">${U.map(u => `<option ${u === l.unit ? 'selected' : ''}>${u}</option>`).join('')}</select><button class="btn sec sm" data-x="${k}" style="flex:0 0 48px">✕</button></div>`).join('')}
      ${ING.length ? '<button class="btn sec sm block" id="r_add" style="margin-top:10px">➕ مادة</button>' : '<div class="sample">أضف المواد الخام أولاً من «المزيد ← المواد الخام»</div>'}
-     <div style="height:12px"></div><button class="btn block" id="r_s">حفظ الوصفة</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
+     <div style="height:12px"></div><button class="btn block" id="r_s">حفظ الوصفة</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
     const M = $('#modal');
     M.querySelectorAll('[data-i]').forEach(e => e.onchange = () => lines[e.dataset.i].ingredient_id = Number(e.value));
     M.querySelectorAll('[data-q]').forEach(e => e.oninput = () => lines[e.dataset.q].qty = Number(e.value.replace(',', '.')) || 0);
@@ -436,7 +436,7 @@ async function ingredientsView() {
      <div id="i_pk_w" style="display:none"><label id="i_pk_l"></label><input id="i_pk" inputmode="decimal" value="${i.pack ?? ''}"></div>
      <div class="sample" id="i_res" style="margin-top:10px"></div>
      <label style="display:flex;gap:10px;align-items:center;font-size:19px;color:inherit"><input type="checkbox" id="i_a" style="width:28px;height:28px" ${i.active !== 0 ? 'checked' : ''}> مستخدمة</label>
-     <div style="height:12px"></div><button class="btn block" id="i_s">حفظ</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
+     <div style="height:12px"></div><button class="btn block" id="i_s">حفظ</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
     const bu = () => $('#i_bu').value === '*' ? $('#i_bt').value.trim() : $('#i_bu').value;
     const upd = () => {
       const base = $('#i_u').value, u = bu(), f = u ? unitF(u, base) : 1;
@@ -475,7 +475,7 @@ function productForm(p) {
    <label>سعر البيع (ريال لكل ${esc(p.unit || 'حبة')}) — نفس السعر لكل المطاعم</label><input id="p_pr" inputmode="decimal" value="${p.price ?? ''}">
    ${p.lines && p.lines.length ? `<div class="mut" style="margin-top:6px">للمعلومة فقط: تكلفة ال${esc(p.unit)} من الوصفة ${sar(p.cost_per_unit)} — السعر بتحدده انت.</div>` : ''}
    <label style="display:flex;gap:10px;align-items:center;font-size:19px;color:inherit"><input type="checkbox" id="p_a" style="width:28px;height:28px" ${p.active ? 'checked' : ''}> ظاهر في الطلبات</label>
-   <div style="height:12px"></div><button class="btn block" id="p_s">حفظ</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
+   <div style="height:12px"></div><button class="btn block" id="p_s">حفظ</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
   $('#p_s').onclick = async () => { try { await api('/api/m/products', { id: p.id, name: $('#p_n').value, unit: $('#p_u').value, price: $('#p_pr').value, active: $('#p_a').checked }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); productsView(); } catch (e) { toast(e.message); } };
 }
 async function settingsView() {

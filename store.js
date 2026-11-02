@@ -14,7 +14,7 @@
     if (DB) return DB;
     let d = null;
     try { d = await idbGet('db'); } catch (e) { try { d = JSON.parse(localStorage.getItem('talabiyat_db') || 'null'); } catch (_) {} }
-    DB = d && d.app === 'talabiyat' ? Object.assign(empty(), d) : empty(); if (!Array.isArray(DB.stock_moves)) DB.stock_moves = [];
+    DB = d && d.app === 'talabiyat' ? normalize(d) : empty();
     if (!d) { addProduct('ورق العنب', 'حبة', 0); addProduct('الملفوف', 'حبة', 0); await save(); }
     return DB;
   }
@@ -34,6 +34,50 @@
   const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
   const nextId = t => (DB.seq[t] = (DB.seq[t] || 0) + 1);
   const byId = (t, id) => DB[t].find(x => x.id === Number(id));
+  // ---------- تنظيف البيانات (نسخة احتياطية من ملف خارجي ممكن تكون معدّلة): كل حقل بنوعه الصحيح ----------
+  const SAFE_URL = u => /^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '';
+  const SCHEMA = {
+    products: { id: 'n', name: 's', unit: 's', price: 'n', active: 'b', sort: 'n' },
+    restaurants: { id: 'n', name: 's', phone: 's', address: 's', map_url: 'u', lat: 'n?', lng: 'n?', active: 'b', route_order: 'n', sample: 'b', created_at: 's' },
+    orders: { id: 'n', restaurant_id: 'n', delivery_date: 'd', status: ['new', 'prepared', 'delivered', 'cancelled'], source: 's', note: 's', created_at: 's', updated_at: 's' },
+    payments: { id: 'n', restaurant_id: 'n', date: 'd', amount: 'n', method: 's', note: 's', created_at: 's' },
+    expenses: { id: 'n', date: 'd', category: 's', amount: 'n', supplier: 's', paid: 'b', note: 's', created_at: 's' },
+    ingredients: { id: 'n', name: 's', unit: 's', cost: 'n', active: 'b', buy_price: 'n?', buy_qty: 'n?', buy_unit: 's?', pack: 'n?' },
+    recipe_items: { product_id: 'n', ingredient_id: 'n', qty: 'n', unit: ['غرام', 'كغ', 'مل', 'لتر', 'حبة'] },
+    stock_moves: { id: 'n', ingredient_id: 'n', kind: ['count', 'add', 'use'], qty: 'n', date: 'd', at: 's' },
+  };
+  const ITEM = { product_id: 'n', qty: 'n', price: 'n' };
+  function cleanRec(x, sch) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+    const o = {};
+    for (const [k, t] of Object.entries(sch)) {
+      const v = x[k];
+      if (Array.isArray(t)) { o[k] = t.includes(v) ? v : t[0]; continue; }
+      if (t.endsWith('?') && (v === undefined || v === null || v === '')) continue;
+      if (t[0] === 'n') { const n = Number(v); o[k] = Number.isFinite(n) ? n : 0; }
+      else if (t === 'b') o[k] = v ? 1 : 0;
+      else if (t === 'd') { if (!isDate(v)) return null; o[k] = v; }
+      else if (t === 'u') o[k] = SAFE_URL(v);
+      else o[k] = typeof v === 'string' ? v : v == null ? '' : String(v);
+    }
+    return o;
+  }
+  function normalize(d) {
+    const out = empty(); out.v = Number(d.v) || 1;
+    for (const k of Object.keys(SCHEMA)) {
+      const arr = Array.isArray(d[k]) ? d[k] : [];
+      out[k] = arr.map(x => { const r = cleanRec(x, SCHEMA[k]); if (r && k === 'orders') r.items = (Array.isArray(x.items) ? x.items : []).map(i => cleanRec(i, ITEM)).filter(Boolean); return r; }).filter(Boolean);
+    }
+    const s = d.settings && typeof d.settings === 'object' ? d.settings : {};
+    out.settings.factory_name = typeof s.factory_name === 'string' ? s.factory_name : out.settings.factory_name;
+    for (const k of ['backup_every', 'stop_days']) if (Number.isFinite(Number(s[k])) && s[k] !== null && s[k] !== '') out.settings[k] = Number(s[k]);
+    if (typeof s.last_backup === 'string' && !isNaN(Date.parse(s.last_backup))) out.settings.last_backup = s.last_backup;
+    if (/^[0-9a-f]{16,128}$/.test(s.pin_hash || '') && /^[0-9a-f]{16,128}$/.test(s.pin_salt || '')) { out.settings.pin_hash = s.pin_hash; out.settings.pin_salt = s.pin_salt; }
+    const seq = d.seq && typeof d.seq === 'object' ? d.seq : {};
+    for (const k of Object.keys(SCHEMA)) out.seq[k] = Math.max(Number.isFinite(Number(seq[k])) ? Number(seq[k]) : 0, ...out[k].map(x => x.id || 0));
+    if (d.saved_at && typeof d.saved_at === 'string') out.saved_at = d.saved_at;
+    return out;
+  }
   class ApiError extends Error { constructor(m, s = 400) { super(m); this.status = s; } }
   const fail = (m, s) => { throw new ApiError(m, s); };
   function addProduct(name, unit, price) { DB.products.push({ id: nextId('products'), name, unit: unit || 'حبة', price: Number(price) || 0, active: 1, sort: DB.products.length + 1 }); }
@@ -57,7 +101,17 @@
   }
   async function setPin(pin) { const salt = hex(crypto.getRandomValues(new Uint8Array(16))); DB.settings.pin_salt = salt; DB.settings.pin_hash = await pbkdf2(pin, salt); }
   async function checkPin(pin) { if (!DB.settings.pin_hash) return false; return (await pbkdf2(String(pin || ''), DB.settings.pin_salt)) === DB.settings.pin_hash; }
-  let fails = 0, lockUntil = 0;
+  // حد للمحاولات محفوظ على الجهاز (ما بينمسح بإعادة فتح التطبيق): بعد 5 أخطاء قفل دقيقة، وكل قفل بعده ضعف اللي قبله (لحد ساعة)
+  const LOCK_KEY = 'talabiyat_lock';
+  const lockGet = () => { try { const x = JSON.parse(localStorage.getItem(LOCK_KEY) || '{}'); return { f: Number(x.f) || 0, until: Number(x.until) || 0, n: Number(x.n) || 0 }; } catch (_) { return { f: 0, until: 0, n: 0 }; } };
+  const lockSet = x => localStorage.setItem(LOCK_KEY, JSON.stringify(x));
+  async function guardedPin(pin) {
+    const L = lockGet(), left = L.until - Date.now();
+    if (left > 0) fail(`محاولات كثيرة، جرّب بعد ${Math.ceil(left / 60e3)} دقيقة`, 429);
+    if (await checkPin(pin)) { lockSet({ f: 0, until: 0, n: 0 }); return true; }
+    L.f++; if (L.f >= 5) { L.until = Date.now() + Math.min(60e3 * 2 ** L.n, 3600e3); L.n++; L.f = 0; } lockSet(L);
+    return false;
+  }
   const SESSION_DAYS = 30;
   const loggedIn = () => DB.settings.pin_hash && Number(localStorage.getItem('talabiyat_auth') || 0) > Date.now();
 
@@ -100,9 +154,8 @@
     localStorage.setItem('talabiyat_auth', Date.now() + SESSION_DAYS * 864e5); return { ok: true };
   }, true);
   on('POST', '/api/manager/login', async b => {
-    if (Date.now() < lockUntil) fail('محاولات كثيرة، جرّب بعد دقيقة', 429);
-    if (!(await checkPin(b.pin))) { if (++fails >= 5) { lockUntil = Date.now() + 60e3; fails = 0; } fail('الرقم السري غير صحيح', 401); }
-    fails = 0; localStorage.setItem('talabiyat_auth', Date.now() + SESSION_DAYS * 864e5); return { ok: true };
+    if (!(await guardedPin(b.pin))) fail('الرقم السري غير صحيح', 401);
+    localStorage.setItem('talabiyat_auth', Date.now() + SESSION_DAYS * 864e5); return { ok: true };
   }, true);
 
   on('GET', '/api/m/lookups', () => ({ today: today(), products: sortProducts(DB.products).filter(p => p.active).map(({ id, name, unit, price }) => ({ id, name, unit, price })),
@@ -148,7 +201,8 @@
   });
   on('POST', '/api/m/restaurants', b => {
     if (!b.name || !String(b.name).trim()) fail('اكتب اسم المطعم');
-    const f = { name: b.name.trim(), phone: b.phone || '', address: b.address || '', map_url: b.map_url || '' };
+    const f = { name: String(b.name).trim(), phone: String(b.phone || ''), address: String(b.address || ''), map_url: SAFE_URL(b.map_url) };
+    if (String(b.map_url || '').trim() && !f.map_url) fail('رابط الخريطة لازم يبدأ بـ https://');
     const c = coordsFrom(f.map_url);
     if (b.lat != null && b.lat !== '' && !isNaN(b.lat)) { f.lat = Number(b.lat); f.lng = Number(b.lng); } else if (c) Object.assign(f, c);
     if (b.id) Object.assign(byId('restaurants', b.id), f);
@@ -166,7 +220,7 @@
     return { ok: true };
   });
   on('POST', '/api/m/pin', async b => {
-    if (!(await checkPin(b.current))) fail('الرقم السري الحالي غير صحيح');
+    if (!(await guardedPin(b.current))) fail('الرقم السري الحالي غير صحيح');
     if (!/^\d{4,8}$/.test(String(b.new_pin || ''))) fail('الرقم الجديد لازم يكون من 4 إلى 8 أرقام');
     if (String(b.new_pin) !== String(b.confirm)) fail('الرقم الجديد والتأكيد مش متطابقين');
     await setPin(b.new_pin); return { ok: true };
@@ -331,7 +385,7 @@
   on('POST', '/api/m/restore', b => {
     const d = b.data; if (!d || d.app !== 'talabiyat' || !Array.isArray(d.orders) || !Array.isArray(d.products)) fail('الملف مش نسخة احتياطية من طلبيات');
     const keep = { pin_hash: DB.settings.pin_hash, pin_salt: DB.settings.pin_salt };
-    DB = Object.assign(empty(), d); delete DB.exported_at; if (!Array.isArray(DB.stock_moves)) DB.stock_moves = [];
+    DB = normalize(d);
     if (!b.use_backup_pin || !DB.settings.pin_hash) Object.assign(DB.settings, keep); // افتراضياً: نحتفظ بالرقم السري الحالي
     DB.settings.last_backup = DB.settings.last_backup || nowIso();
     return { ok: true, counts: { orders: DB.orders.length, restaurants: DB.restaurants.length, payments: DB.payments.length } };

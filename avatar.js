@@ -2,12 +2,16 @@
 const AVATAR_NAME = 'أحمد'; // اسم المساعد: غيّره هون فقط
 const AVATAR_IMG = 'icons/avatar-ahmed.jpg';
 const AVATAR_FALLBACK = '🧑‍🍳';
+// بدل onerror داخل الـHTML (ممنوع بسياسة الأمان): لو صورة أحمد ما انفتحت نحط وجه بديل
+document.addEventListener('error', e => { const t = e.target; if (t && t.tagName === 'IMG' && t.hasAttribute('data-fb')) t.replaceWith(Object.assign(document.createElement('span'), { className: 'avfb', textContent: AVATAR_FALLBACK })); }, true);
+// أزرار عامة بدون onclick داخل الـHTML
+document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('[data-close],[data-print]'); if (!t) return; if (t.hasAttribute('data-print')) print(); else if (typeof modal === 'function') modal(''); });
 const AVATAR_FULL = 'icons/ahmed-full.webp'; // صورة كاملة (خلفية شفافة)
 function avatarFace(size = 64, level = 'ok') {
   const ring = level === 'red' ? 'var(--red)' : level === 'yellow' ? '#d08a00' : 'var(--g)';
-  return `<span class="av" style="width:${size}px;height:${size}px;border-color:${ring}"><img src="${AVATAR_IMG}" alt="${esc(AVATAR_NAME)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'avfb',textContent:'${AVATAR_FALLBACK}'}))"></span>`;
+  return `<span class="av" style="width:${size}px;height:${size}px;border-color:${ring}"><img src="${AVATAR_IMG}" alt="${esc(AVATAR_NAME)}" data-fb></span>`;
 }
-const stockAmt = (a, u) => a == null ? '—' : (u === 'كغ' && Math.abs(a) < 1 ? `${num(Math.round(a * 1000))} غرام` : u === 'لتر' && Math.abs(a) < 1 ? `${num(Math.round(a * 1000))} مل` : `${num(Math.round(a * 10) / 10)} ${u}`);
+const stockAmt = (a, u) => a == null ? '—' : (u === 'كغ' && Math.abs(a) < 1 ? `${num(Math.round(a * 1000))} غرام` : u === 'لتر' && Math.abs(a) < 1 ? `${num(Math.round(a * 1000))} مل` : `${num(Math.round(a * 10) / 10)} ${esc(u)}`);
 const daysTxt = d => { const n = Math.floor(d); return d <= 0 ? 'خلص!' : n < 1 ? 'أقل من يوم' : n === 1 ? 'حوالي يوم واحد' : n === 2 ? 'حوالي يومين' : `حوالي ${num(n)} ${n <= 10 ? 'أيام' : 'يوم'}`; };
 const alertLine = i => `<div class="avi ${i.level}"><b>${i.level === 'red' ? '🔴' : '🟡'} ${esc(i.name)}</b>: ${i.days_left <= 0 ? 'خلص أو قرّب يخلص — اطلب الآن' : `باقي ${daysTxt(i.days_left)} — يخلص تقريباً ${fmtDate(i.runout)}`}<div class="mut">الموجود تقريباً: ${stockAmt(i.stock, i.unit)}${i.rate ? ` • الصرف اليومي حوالي ${stockAmt(i.rate, i.unit)}` : ''}</div></div>`;
 
@@ -28,7 +32,7 @@ function renderAvatarBar() {
   el.className = 'avdock ' + sm.level;
   const list = S && S.alerts.length ? S.alerts.map(alertLine).join('') + `<div class="mut" style="margin-top:6px">⚠️ تقدير حسب الاستهلاك في آخر ${S.window_days} يوم (الطلبيات × الوصفات)</div>` : `<div class="avi">${esc(sm.text)}</div>`;
   const notif = ('Notification' in window && Notification.permission === 'default' && S && S.alerts.length) ? '<button class="btn sec sm block" id="av_notif" style="margin-top:8px">🔔 نبّهني بإشعار كمان</button>' : '';
-  el.innerHTML = `<button class="avfig" id="av_tap" aria-expanded="${_avOpen}" aria-label="${esc(AVATAR_NAME)}: ${esc(sm.text)}"><img src="${AVATAR_FULL}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'avfb',textContent:'${AVATAR_FALLBACK}'}))"></button>
+  el.innerHTML = `<button class="avfig" id="av_tap" aria-expanded="${_avOpen}" aria-label="${esc(AVATAR_NAME)}: ${esc(sm.text)}"><img src="${AVATAR_FULL}" alt="" data-fb></button>
     <button class="avbub" id="av_bub"><b>${esc(AVATAR_NAME)}:</b> <span id="av_msg">${esc(sm.text)}</span></button>
     ${_avOpen ? `<div class="avpanel ${sm.level}" id="av_panel"><h3>${esc(AVATAR_NAME)} — المخزون</h3>${list}<a class="btn ${sm.level === 'red' ? 'red' : sm.level === 'yellow' ? 'warn' : 'sec'} block" href="#/stock" id="av_go" style="margin-top:10px">📦 افتح المخزون</a>${notif}<button class="btn sec sm block" id="av_close" style="margin-top:8px">إغلاق ✕</button></div>` : ''}`;
   const tog = () => { _avOpen = !_avOpen; renderAvatarBar(); };
@@ -64,7 +68,7 @@ async function stockView() {
   const form = (i, kind) => {
     modal(`<h2 style="margin-top:0">${kind === 'add' ? '➕ استلمت' : '⚖️ جرد'} — ${esc(i.name)}</h2><div class="mut">${kind === 'add' ? 'الكمية اللي وصلت' : 'الكمية الموجودة عندك الآن بالضبط'} (${esc(i.unit)})</div>
      <input id="st_q" inputmode="decimal" style="font-size:30px;text-align:center;margin-top:8px" placeholder="0">
-     <div style="height:12px"></div><button class="btn block" id="st_s" style="min-height:68px">حفظ ✓</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
+     <div style="height:12px"></div><button class="btn block" id="st_s" style="min-height:68px">حفظ ✓</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
     $('#st_q').focus();
     $('#st_s').onclick = async () => { try { await api('/api/m/stock/' + i.id, { kind, qty: $('#st_q').value.trim() }); modal(''); toast('تم الحفظ ✅'); stockView(); } catch (e) { toast(e.message); } };
   };
