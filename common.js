@@ -1,7 +1,11 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // كل الطلبات تذهب لقاعدة البيانات المحلية على الجهاز (store.js)
-const api = (url, body, method) => Store.api(url, body, method);
+const api = async (url, body, method) => {
+  const r = await Store.api(url, body, method);
+  if ((method || (body ? 'POST' : 'GET')) !== 'GET' && typeof avatarRefresh === 'function') avatarRefresh(); // إعادة حساب المخزون بعد أي تعديل
+  return r;
+};
 function toast(msg) { let t = $('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); } t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 2500); }
 const DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 function fmtDate(d) { const x = new Date(d + 'T12:00:00Z'); return `${DAYS[x.getUTCDay()]} ${x.getUTCDate()}/${x.getUTCMonth() + 1}/${x.getUTCFullYear()}`; }

@@ -14,7 +14,7 @@ async function start() {
   $('#logout').style.display = ''; $('#logout').onclick = async () => { await api('/api/logout', {}); location.reload(); };
   $('#nav').style.display = '';
   L = await api('/api/m/lookups'); dayDate = L.today;
-  window.addEventListener('hashchange', route); route();
+  window.addEventListener('hashchange', route); route(); avatarRefresh();
 }
 // أول تشغيل: يختار المدير رقمه السري (لا يوجد رقم افتراضي)
 function setupView() {
@@ -41,9 +41,9 @@ function route() {
   const [, tab, a, b] = (location.hash || '#/day').split('/');
   document.querySelectorAll('#nav a').forEach(x => x.classList.toggle('on', x.dataset.t === ((tab === 'print' || tab === 'needs') ? 'day' : tab === 'statement' ? 'money' : tab)));
   modal(''); window.scrollTo(0, 0);
-  const views = { day: dayView, route: routeView, money: moneyView, customers: customersView, more: moreView, print: printView, statement: statementView, history: historyView, needs: needsView, ingredients: ingredientsView, products: productsView, settings: settingsView, expenses: expensesView };
+  const views = { day: dayView, route: routeView, money: moneyView, customers: customersView, more: moreView, print: printView, statement: statementView, history: historyView, needs: needsView, ingredients: ingredientsView, products: productsView, settings: settingsView, expenses: expensesView, stock: stockView };
   (views[tab] || dayView)(a, b).catch(e => { if (e.status === 401) location.reload(); app.innerHTML = `<div class="card">${esc(e.message)}</div>`; });
-  $('#title').textContent = { day: 'الطلبات', route: 'التوصيل', money: 'الحسابات', customers: 'الزبائن', more: 'المزيد', print: 'ورقة اليوم', statement: 'كشف حساب', history: 'السجل', needs: 'المواد المطلوبة', ingredients: 'المواد الخام', products: 'الأصناف', settings: 'الإعدادات', expenses: 'المصاريف' }[tab] || 'الطلبات';
+  $('#title').textContent = { day: 'الطلبات', route: 'التوصيل', money: 'الحسابات', customers: 'الزبائن', more: 'المزيد', print: 'ورقة اليوم', statement: 'كشف حساب', history: 'السجل', needs: 'المواد المطلوبة', ingredients: 'المواد الخام', products: 'الأصناف', settings: 'الإعدادات', expenses: 'المصاريف', stock: 'المخزون' }[tab] || 'الطلبات';
 }
 const dateBar = (d, id) => `<div class="datebar no-print"><button class="btn sec sm" id="${id}-prev" title="اليوم السابق">▶</button><div class="d">${d === L.today ? 'اليوم' : d === addDays(L.today, 1) ? 'بكرة' : d === addDays(L.today, -1) ? 'أمس' : ''} ${fmtDate(d)}</div><button class="btn sec sm" id="${id}-next" title="اليوم التالي">◀</button></div>`;
 function bindDateBar(id, cb) { $(`#${id}-next`).onclick = () => { dayDate = addDays(dayDate, 1); cb(); }; $(`#${id}-prev`).onclick = () => { dayDate = addDays(dayDate, -1); cb(); }; }
@@ -53,7 +53,9 @@ async function dayView() {
   const D = await api('/api/m/day?date=' + dayDate);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const REM = await api('/api/m/reminders').catch(() => []);
+  const AV = await avatarCard();
   app.innerHTML = `${installWarning()}
+  ${AV}
   ${REM.length ? `<div class="card remind"><div style="font-size:19px;font-weight:800;margin-bottom:6px">🔔 تنبيهات</div>${REM.map(r => `<div class="ritem">${r.kind === 'backup' ? '💾' : r.kind === 'supplier' ? '🧾' : r.kind === 'old' ? '🚚' : '📞'} ${esc(r.text)}</div>`).join('')}
     ${REM.some(r => r.kind === 'backup') ? '<button class="btn block" id="bk_now" style="margin-top:10px;min-height:64px">💾 نسخ احتياطي الآن</button>' : ''}</div>` : ''}
   ${L.restaurants.length ? '' : `<div class="card"><b>ابدأ بإضافة زبائنك</b> من تبويب «الزبائن» 🏪، وحدّد سعر الحبة من «المزيد ← الأصناف».<div class="row" style="margin-top:10px"><a class="btn sec sm" href="#/customers">🏪 إضافة زبون</a><button class="btn sec sm" id="rs_first">♻️ استعادة نسخة</button></div></div>`}
@@ -82,7 +84,7 @@ async function dayView() {
        ${o.status !== 'delivered' ? `<button class="btn sec sm" data-edit="${o.restaurant_id}">✏️ تعديل</button>` : `<button class="btn sec sm" data-st="new" data-id="${o.id}">↩ تراجع</button>`}
      </div></div>`).join('')}
   ${D.orders.length ? `<div class="card center"><span class="mut">قيمة طلبيات اليوم:</span> <b class="money">${sar(D.day_total)}</b></div>` : ''}`;
-  bindDateBar('db', dayView);
+  bindDateBar('db', dayView); bindAvatarCard();
   if ($('#bk_now')) $('#bk_now').onclick = () => doBackup(dayView);
   if ($('#rs_first')) $('#rs_first').onclick = doRestore;
   app.querySelectorAll('[data-st]').forEach(b => b.onclick = async () => { await api(`/api/m/orders/${b.dataset.id}/status`, { status: b.dataset.st }); toast('تم ✅'); dayView(); });
@@ -344,6 +346,7 @@ async function moreView() {
    <div class="mut center" style="margin-top:8px">${S.last_backup ? 'آخر نسخة: ' + fmtDate(S.last_backup.slice(0, 10)) : 'لسا ما في نسخة احتياطية'}</div></div>
   <div style="display:grid;gap:12px">
    <a class="btn block sec" href="#/products">🥬 الأصناف والأسعار والوصفات</a>
+   <a class="btn block sec" href="#/stock">📦 المخزون (${esc(AVATAR_NAME)} بيراقبه)</a>
    <a class="btn block sec" href="#/ingredients">🧂 المواد الخام وأسعارها</a>
    <a class="btn block sec" href="#/needs/${addDays(L.today, 1)}">📦 المواد المطلوبة لبكرة</a>
    <a class="btn block sec" href="#/history">📅 سجل الأيام</a>

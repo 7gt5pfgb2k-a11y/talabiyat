@@ -3,7 +3,7 @@
   const TZ = 'Asia/Riyadh';
   const IDB_NAME = 'talabiyat', IDB_STORE = 'kv';
   const empty = () => ({ app: 'talabiyat', v: 1, seq: {}, settings: { factory_name: 'معمل الأكل البيتي', backup_every: 7, stop_days: 7 },
-    products: [], restaurants: [], orders: [], payments: [], expenses: [], ingredients: [], recipe_items: [] });
+    products: [], restaurants: [], orders: [], payments: [], expenses: [], ingredients: [], recipe_items: [], stock_moves: [] });
   let DB = null;
 
   // ---------- IndexedDB ----------
@@ -14,7 +14,7 @@
     if (DB) return DB;
     let d = null;
     try { d = await idbGet('db'); } catch (e) { try { d = JSON.parse(localStorage.getItem('talabiyat_db') || 'null'); } catch (_) {} }
-    DB = d && d.app === 'talabiyat' ? Object.assign(empty(), d) : empty();
+    DB = d && d.app === 'talabiyat' ? Object.assign(empty(), d) : empty(); if (!Array.isArray(DB.stock_moves)) DB.stock_moves = [];
     if (!d) { addProduct('ورق العنب', 'حبة', 0); addProduct('الملفوف', 'حبة', 0); await save(); }
     return DB;
   }
@@ -243,6 +243,59 @@
       production_cost: round2(cost), sales_value: round2(value), profit: round2(value - cost), suggestions,
       products: totals.map(t => ({ ...t, name: (rb[t.product_id] || {}).name, unit: (rb[t.product_id] || {}).unit, cost_per_unit: (rb[t.product_id] || {}).cost_per_unit })) };
   });
+  // ----- المخزون: معدل الاستهلاك والأيام المتبقية (تقدير) -----
+  // الاستهلاك = الطلبيات (غير الملغاة) × الوصفات + أي صرف/هدر يدوي. النافذة: آخر 7–14 يوم حسب البيانات المتوفرة.
+  const STOCK_MIN_DAYS = 7, STOCK_MAX_DAYS = 14, STOCK_RED = 3, STOCK_YELLOW = 5;
+  function ingPerProduct(ing) { const per = {}; DB.recipe_items.filter(r => r.ingredient_id === ing.id).forEach(r => per[r.product_id] = toIngUnit(r.qty, r.unit, ing.unit)); return per; }
+  function usage(ing, after, upto, per, afterAt) { // استهلاك في الفترة (after, upto]؛ ولو afterAt: طلبيات نفس يوم الجرد المسجّلة بعده
+    let u = 0;
+    DB.orders.forEach(o => { if (!live(o) || o.delivery_date > upto) return;
+      if (o.delivery_date < after || (o.delivery_date === after && !(afterAt && (o.created_at || '') > afterAt))) return;
+      o.items.forEach(i => { if (per[i.product_id]) u += per[i.product_id] * i.qty; }); });
+    return u;
+  }
+  function stockInfo() {
+    const t = today(), mv = DB.stock_moves || [];
+    const dates = DB.orders.filter(live).map(o => o.delivery_date).concat(mv.map(m => m.date)).filter(d => d <= t).sort();
+    const start = dates.length ? (dates[0] > addDays(t, -(STOCK_MAX_DAYS - 1)) ? dates[0] : addDays(t, -(STOCK_MAX_DAYS - 1))) : t;
+    const window_days = dates.length ? daysBetween(start, t) + 1 : 0;
+    const items = DB.ingredients.filter(i => i.active).map(ing => {
+      const per = ingPerProduct(ing), my = mv.filter(m => m.ingredient_id === ing.id).sort((a, b) => a.id - b.id);
+      const r = { id: ing.id, name: ing.name, unit: ing.unit, has_recipe: Object.keys(per).length > 0, stock: null, rate: null, days_left: null, runout: null, level: 'none', reason: '' };
+      if (my.length) {
+        const cnt = my.filter(m => m.kind === 'count').pop(), base = cnt || my[0];
+        let s = cnt ? cnt.qty : 0;
+        my.forEach(m => { if (cnt && m.id <= cnt.id) return; if (m.kind === 'add') s += m.qty; if (m.kind === 'use') s -= m.qty; });
+        s -= usage(ing, base.date, t, per, base.at);
+        r.stock = Math.round(s * 1000) / 1000; r.updated = base.date;
+      }
+      const wUse = usage(ing, addDays(start, -1), t, per) + mv.filter(m => m.ingredient_id === ing.id && m.kind === 'use' && m.date >= start && m.date <= t).reduce((a, m) => a + m.qty, 0);
+      if (window_days < STOCK_MIN_DAYS) r.reason = 'few_days';
+      else if (!r.has_recipe && !wUse) r.reason = 'no_recipe';
+      else if (wUse <= 0) r.reason = 'no_use';
+      else r.rate = wUse / window_days;
+      if (r.stock != null && r.stock <= 0) { r.days_left = 0; r.runout = t; r.level = 'red'; }
+      else if (r.stock != null && r.rate) {
+        r.days_left = Math.round(r.stock / r.rate * 10) / 10; r.runout = addDays(t, Math.floor(r.stock / r.rate));
+        r.level = r.days_left < STOCK_RED ? 'red' : r.days_left < STOCK_YELLOW ? 'yellow' : 'ok';
+      }
+      if (r.rate) r.rate = Math.round(r.rate * 1000) / 1000;
+      return r;
+    });
+    const rank = { red: 0, yellow: 1, ok: 2, none: 3 };
+    items.sort((a, b) => rank[a.level] - rank[b.level] || (a.days_left ?? 1e9) - (b.days_left ?? 1e9) || a.name.localeCompare(b.name, 'ar'));
+    return { today: t, window_days: Math.min(window_days, STOCK_MAX_DAYS), min_days: STOCK_MIN_DAYS, red_days: STOCK_RED, yellow_days: STOCK_YELLOW, items,
+      alerts: items.filter(i => i.level === 'red' || i.level === 'yellow'), tracked: items.filter(i => i.stock != null).length };
+  }
+  on('GET', '/api/m/stock', () => stockInfo());
+  on('POST', '/api/m/stock/:id', (b, q, p) => {
+    const ing = byId('ingredients', p.id); if (!ing) fail('مادة غير موجودة');
+    if (!['count', 'add', 'use'].includes(b.kind)) fail('نوع غير صحيح');
+    const qty = Number(String(b.qty ?? '').replace(',', '.'));
+    if (!(qty >= 0) || String(b.qty ?? '').trim() === '' || (b.kind !== 'count' && !(qty > 0))) fail('اكتب الكمية');
+    DB.stock_moves.push({ id: nextId('stock_moves'), ingredient_id: ing.id, kind: b.kind, qty, date: isDate(b.date) ? b.date : today(), at: nowIso() });
+    return { ok: true };
+  });
   // ----- تنبيهات محسوبة داخل التطبيق -----
   on('GET', '/api/m/reminders', () => {
     const s = DB.settings, t = today(), out = [];
@@ -266,7 +319,7 @@
   on('POST', '/api/m/restore', b => {
     const d = b.data; if (!d || d.app !== 'talabiyat' || !Array.isArray(d.orders) || !Array.isArray(d.products)) fail('الملف مش نسخة احتياطية من طلبيات');
     const keep = { pin_hash: DB.settings.pin_hash, pin_salt: DB.settings.pin_salt };
-    DB = Object.assign(empty(), d); delete DB.exported_at;
+    DB = Object.assign(empty(), d); delete DB.exported_at; if (!Array.isArray(DB.stock_moves)) DB.stock_moves = [];
     if (!b.use_backup_pin || !DB.settings.pin_hash) Object.assign(DB.settings, keep); // افتراضياً: نحتفظ بالرقم السري الحالي
     DB.settings.last_backup = DB.settings.last_backup || nowIso();
     return { ok: true, counts: { orders: DB.orders.length, restaurants: DB.restaurants.length, payments: DB.payments.length } };
