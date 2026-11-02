@@ -414,24 +414,46 @@ async function recipeForm(p) {
   }
   render();
 }
+const BUY_UNITS = ['كغ', 'غرام', 'لتر', 'مل', 'حبة', 'كرتون', 'علبة', 'كيس', 'تنكة'];
+const SAME_DIM = { 'كغ': 'كغ', 'غرام': 'كغ', 'لتر': 'لتر', 'مل': 'لتر', 'حبة': 'حبة' }, DIM_F = { 'كغ': 1, 'غرام': 0.001, 'لتر': 1, 'مل': 0.001, 'حبة': 1 };
+const unitF = (bu, base) => SAME_DIM[bu] && SAME_DIM[bu] === SAME_DIM[base] ? DIM_F[bu] / DIM_F[base] : bu === base ? 1 : null;
+const toN = v => Number(String(v ?? '').trim().replace(/[٠-٩]/g, d => d.charCodeAt(0) - 1632).replace(/[٫,]/g, '.'));
+const num3 = n => (Math.round(n * 1000) / 1000).toLocaleString('en-US');
 async function ingredientsView() {
   const I = await api('/api/m/ingredients');
   app.innerHTML = `<button class="btn block" id="iadd">➕ مادة خام جديدة</button><div style="height:12px"></div>
-  ${I.map(i => `<div class="card row" data-i="${i.id}" style="${i.active ? '' : 'opacity:.6'}"><b style="font-size:20px">${esc(i.name)}</b><b class="money" style="flex:0 0 auto">${sar(i.cost)} / ${esc(i.unit)}</b></div>`).join('') || '<div class="card mut">لا يوجد</div>'}
+  ${I.map(i => `<div class="card" data-i="${i.id}" style="${i.active ? '' : 'opacity:.6'}"><div class="row"><b style="font-size:20px">${esc(i.name)}</b><b class="money" style="flex:0 0 auto">${num3(i.cost)} ريال / ${esc(i.unit)}</b></div>
+    <div class="mut">الشراء: ${num(i.buy_price)} ريال لكل ${num(i.buy_qty)} ${esc(i.buy_unit)}${i.pack ? ` (ال${esc(i.buy_unit)} فيه ${num(i.pack)} ${esc(i.unit)})` : ''}</div></div>`).join('') || '<div class="card mut">لا يوجد</div>'}
   <p class="mut">سعر الشراء يُستخدم لحساب تكلفة الحبة والمواد المطلوبة لكل يوم.</p>`;
   const form = i => {
+    const bu0 = i.buy_unit || i.unit || 'كغ', other = !BUY_UNITS.includes(bu0);
     modal(`<h2 style="margin-top:0">${i.id ? 'تعديل مادة' : 'مادة جديدة'}</h2><label>الاسم</label><input id="i_n" value="${esc(i.name || '')}">
-     <label>وحدة الشراء</label><select id="i_u">${['كغ', 'لتر', 'حبة'].map(u => `<option ${u === i.unit ? 'selected' : ''}>${u}</option>`).join('')}</select>
-     <label>سعر الشراء (ريال لكل وحدة)</label><input id="i_c" inputmode="decimal" value="${i.cost ?? ''}">
+     <label>وحدة الحساب (للوصفة والمخزون)</label><select id="i_u">${['كغ', 'لتر', 'حبة'].map(u => `<option ${u === i.unit ? 'selected' : ''}>${u}</option>`).join('')}</select>
+     <label>سعر الشراء (ريال)</label><input id="i_c" inputmode="decimal" placeholder="مثلاً 150" value="${i.buy_price ?? ''}">
+     <label>لكل</label><div class="row" style="gap:8px"><input id="i_q" inputmode="decimal" style="flex:0 0 90px;text-align:center" value="${i.buy_qty ?? 1}">
+       <select id="i_bu">${BUY_UNITS.map(u => `<option ${u === bu0 ? 'selected' : ''}>${u}</option>`).join('')}<option value="*" ${other ? 'selected' : ''}>✍️ غير…</option></select></div>
+     <input id="i_bt" placeholder="اكتب الوحدة (مثلاً: شوال)" style="margin-top:8px;${other ? '' : 'display:none'}" value="${other ? esc(bu0) : ''}">
+     <div id="i_pk_w" style="display:none"><label id="i_pk_l"></label><input id="i_pk" inputmode="decimal" value="${i.pack ?? ''}"></div>
+     <div class="sample" id="i_res" style="margin-top:10px"></div>
      <label style="display:flex;gap:10px;align-items:center;font-size:19px;color:inherit"><input type="checkbox" id="i_a" style="width:28px;height:28px" ${i.active !== 0 ? 'checked' : ''}> مستخدمة</label>
      <div style="height:12px"></div><button class="btn block" id="i_s">حفظ</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
-    $('#i_s').onclick = async () => { try { await api('/api/m/ingredients', { id: i.id, name: $('#i_n').value, unit: $('#i_u').value, cost: $('#i_c').value, active: $('#i_a').checked }); modal(''); toast('تم الحفظ ✅'); ingredientsView(); } catch (e) { toast(e.message); } };
+    const bu = () => $('#i_bu').value === '*' ? $('#i_bt').value.trim() : $('#i_bu').value;
+    const upd = () => {
+      const base = $('#i_u').value, u = bu(), f = u ? unitF(u, base) : 1;
+      $('#i_bt').style.display = $('#i_bu').value === '*' ? '' : 'none';
+      $('#i_pk_w').style.display = f == null ? '' : 'none'; $('#i_pk_l').textContent = `ال${u} الواحد فيه كم ${base}؟`;
+      const p = toN($('#i_c').value), q = $('#i_q').value.trim() === '' ? 1 : toN($('#i_q').value), fac = f == null ? toN($('#i_pk').value) : f;
+      $('#i_res').textContent = p >= 0 && q > 0 && fac > 0 && $('#i_c').value.trim() !== '' ? `= ${num3(p / (q * fac))} ريال لكل ${base}` : `التكلفة لكل ${base} بتنحسب لحالها`;
+    };
+    ['#i_u', '#i_bu', '#i_c', '#i_q', '#i_bt', '#i_pk'].forEach(k => { $(k).oninput = upd; $(k).onchange = upd; }); upd();
+    $('#i_s').onclick = async () => { try {
+      if (!bu()) throw new Error('اكتب الوحدة');
+      await api('/api/m/ingredients', { id: i.id, name: $('#i_n').value, unit: $('#i_u').value, buy_price: $('#i_c').value, buy_qty: $('#i_q').value, buy_unit: bu(), pack: $('#i_pk').value, active: $('#i_a').checked });
+      modal(''); toast('تم الحفظ ✅'); ingredientsView(); } catch (e) { toast(e.message); } };
   };
   $('#iadd').onclick = () => form({ unit: 'كغ', active: 1 });
   app.querySelectorAll('[data-i]').forEach(c => c.onclick = () => form(I.find(x => x.id == c.dataset.i)));
 }
-// كمية مادة خام بشكل مقروء (أقل من 1 كغ ← غرام)
-const amt = (a, u) => u === 'كغ' && a < 1 ? `${num(Math.round(a * 1000))} غرام` : u === 'لتر' && a < 1 ? `${num(Math.round(a * 1000))} مل` : `${num(Math.round(a * 10) / 10)} ${u}`;
 const needsHtml = F => `<table><tr><th>المادة</th><th>الكمية</th><th>التكلفة</th></tr>${F.needs.map(n => `<tr><td>${esc(n.name)}</td><td><b>${amt(n.amount, n.unit)}</b></td><td>${sar(n.cost)}</td></tr>`).join('')}</table>`;
 async function needsView(date) {
   if (date) dayDate = date;
@@ -450,7 +472,8 @@ function productForm(p) {
   modal(`<h2 style="margin-top:0">${p.id ? 'تعديل صنف' : 'صنف جديد'}</h2>
    <label>اسم الصنف</label><input id="p_n" value="${esc(p.name || '')}">
    <label>الوحدة</label><select id="p_u">${['حبة', 'صينية', 'علبة', 'طبق', 'كغ'].map(u => `<option ${u === p.unit ? 'selected' : ''}>${u}</option>`).join('')}</select>
-   <label>السعر (ريال لكل ${esc(p.unit || 'حبة')}) — نفس السعر لكل المطاعم</label><input id="p_pr" inputmode="decimal" value="${p.price ?? ''}">
+   <label>سعر البيع (ريال لكل ${esc(p.unit || 'حبة')}) — نفس السعر لكل المطاعم</label><input id="p_pr" inputmode="decimal" value="${p.price ?? ''}">
+   ${p.lines && p.lines.length ? `<div class="mut" style="margin-top:6px">للمعلومة فقط: تكلفة ال${esc(p.unit)} من الوصفة ${sar(p.cost_per_unit)} — السعر بتحدده انت.</div>` : ''}
    <label style="display:flex;gap:10px;align-items:center;font-size:19px;color:inherit"><input type="checkbox" id="p_a" style="width:28px;height:28px" ${p.active ? 'checked' : ''}> ظاهر في الطلبات</label>
    <div style="height:12px"></div><button class="btn block" id="p_s">حفظ</button><button class="btn sec block" style="margin-top:8px" onclick="modal('')">إلغاء</button>`);
   $('#p_s').onclick = async () => { try { await api('/api/m/products', { id: p.id, name: $('#p_n').value, unit: $('#p_u').value, price: $('#p_pr').value, active: $('#p_a').checked }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); productsView(); } catch (e) { toast(e.message); } };

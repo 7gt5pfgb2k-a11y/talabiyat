@@ -136,8 +136,8 @@
   on('GET', '/api/m/products', () => sortProducts(DB.products));
   on('POST', '/api/m/products', b => {
     if (!b.name || !String(b.name).trim()) fail('اكتب اسم الصنف');
-    if (b.id) { const p = byId('products', b.id); Object.assign(p, { name: b.name.trim(), unit: b.unit || 'حبة', price: Number(b.price) || 0, active: b.active ? 1 : 0 }); }
-    else addProduct(b.name.trim(), b.unit, b.price);
+    if (b.id) { const p = byId('products', b.id); Object.assign(p, { name: b.name.trim(), unit: b.unit || 'حبة', price: toNum(b.price) || 0, active: b.active ? 1 : 0 }); }
+    else addProduct(b.name.trim(), b.unit, toNum(b.price));
     return { ok: true };
   });
   on('GET', '/api/m/restaurants', () => {
@@ -215,10 +215,22 @@
       by_category: Object.entries(cat).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount), today: today() };
   });
   // ----- مواد خام ووصفات وتوقعات -----
-  on('GET', '/api/m/ingredients', () => DB.ingredients.slice().sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name, 'ar')));
+  // سعر الشراء حر: «X ريال لكل N وحدة» (كرتون/علبة… مع كم فيه من وحدة الحساب). البيانات القديمة: cost لكل وحدة ⇒ لكل 1
+  const toNum = v => Number(String(v ?? '').trim().replace(/[٠-٩]/g, d => d.charCodeAt(0) - 1632).replace(/[٫,]/g, '.'));
+  const unitFactor = (bu, base) => { const a = LINE_UNITS[bu], b = LINE_UNITS[base]; return a && b && a[0] === b[0] ? a[1] / b[1] : (bu === base ? 1 : null); };
+  const ingOut = i => ({ ...i, buy_price: i.buy_price ?? i.cost, buy_qty: i.buy_qty || 1, buy_unit: i.buy_unit || i.unit, pack: i.pack || null });
+  on('GET', '/api/m/ingredients', () => DB.ingredients.map(ingOut).sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name, 'ar')));
   on('POST', '/api/m/ingredients', b => {
     if (!b.name || !String(b.name).trim()) fail('اكتب اسم المادة');
-    const f = { name: b.name.trim(), unit: b.unit || 'كغ', cost: Number(b.cost) || 0, active: b.active === false ? 0 : 1 };
+    const unit = b.unit || 'كغ', f = { name: b.name.trim(), unit, active: b.active === false ? 0 : 1 };
+    if (b.buy_price === undefined) f.cost = toNum(b.cost) || 0; // صيغة قديمة: سعر لكل وحدة
+    else {
+      const price = toNum(b.buy_price), qty = b.buy_qty === undefined || String(b.buy_qty).trim() === '' ? 1 : toNum(b.buy_qty), bu = String(b.buy_unit || unit).trim() || unit;
+      if (!(price >= 0)) fail('اكتب سعر الشراء رقم'); if (!(qty > 0)) fail('اكتب الكمية (لكل كم؟) رقم أكبر من صفر');
+      let fac = unitFactor(bu, unit), pack = null;
+      if (fac == null) { pack = toNum(b.pack); if (!(pack > 0)) fail(`اكتب كم ${unit} في ال${bu} الواحد`); fac = pack; }
+      Object.assign(f, { buy_price: price, buy_qty: qty, buy_unit: bu, pack, cost: Math.round(price / (qty * fac) * 1e6) / 1e6 });
+    }
     if (b.id) Object.assign(byId('ingredients', b.id), f); else DB.ingredients.push({ id: nextId('ingredients'), ...f });
     return { ok: true };
   });
