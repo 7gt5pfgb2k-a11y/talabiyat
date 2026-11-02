@@ -350,6 +350,7 @@ async function moreView() {
    <button class="btn sec block" id="rs" style="min-height:72px;font-size:22px;margin-top:10px">♻️ استعادة</button>
    <div class="mut center" style="margin-top:8px">${S.last_backup ? 'آخر نسخة: ' + fmtDate(S.last_backup.slice(0, 10)) : 'لسا ما في نسخة احتياطية'}</div></div>
   <div style="display:grid;gap:12px">
+   <button class="btn block hlp-open" id="more_help" data-openhelp>❓ مساعدة — اسأل ${esc(AVATAR_NAME)}</button>
    <a class="btn block sec" href="#/products">🥬 الأصناف والأسعار والوصفات</a>
    <a class="btn block sec" href="#/stock">📦 المخزون (${esc(AVATAR_NAME)} بيراقبه)</a>
    <a class="btn block sec" href="#/ingredients">🧂 المواد الخام وأسعارها</a>

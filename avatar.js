@@ -29,13 +29,14 @@ function avatarSummary(S) {
 function renderAvatarBar() {
   const el = $('#avbar'); if (!el) return;
   const S = _avS, sm = avatarSummary(S);
+  const greet = typeof helpGreeting === 'function' && helpGreeting() && sm.level === 'ok'; if (greet) sm.text = HELP_GREET_TEXT;
   el.className = 'avdock ' + sm.level;
   const list = S && S.alerts.length ? S.alerts.map(alertLine).join('') + `<div class="mut" style="margin-top:6px">⚠️ تقدير حسب الاستهلاك في آخر ${S.window_days} يوم (الطلبيات × الوصفات)</div>` : `<div class="avi">${esc(sm.text)}</div>`;
   const notif = ('Notification' in window && Notification.permission === 'default' && S && S.alerts.length) ? '<button class="btn sec sm block" id="av_notif" style="margin-top:8px">🔔 نبّهني بإشعار كمان</button>' : '';
   el.innerHTML = `<button class="avfig" id="av_tap" aria-expanded="${_avOpen}" aria-label="${esc(AVATAR_NAME)}: ${esc(sm.text)}"><img src="${AVATAR_FULL}" alt="" data-fb></button>
     <button class="avbub" id="av_bub"><b>${esc(AVATAR_NAME)}:</b> <span id="av_msg">${esc(sm.text)}</span></button>
-    ${_avOpen ? `<div class="avpanel ${sm.level}" id="av_panel"><h3>${esc(AVATAR_NAME)} — المخزون</h3>${list}<a class="btn ${sm.level === 'red' ? 'red' : sm.level === 'yellow' ? 'warn' : 'sec'} block" href="#/stock" id="av_go" style="margin-top:10px">📦 افتح المخزون</a>${notif}<button class="btn sec sm block" id="av_close" style="margin-top:8px">إغلاق ✕</button></div>` : ''}`;
-  const tog = () => { _avOpen = !_avOpen; renderAvatarBar(); };
+    ${_avOpen ? `<div class="avpanel ${sm.level}" id="av_panel"><h3>${esc(AVATAR_NAME)} — المخزون</h3>${list}<a class="btn ${sm.level === 'red' ? 'red' : sm.level === 'yellow' ? 'warn' : 'sec'} block" href="#/stock" id="av_go" style="margin-top:10px">📦 افتح المخزون</a>${notif}<button class="btn block hlp-open" id="av_help" data-openhelp style="margin-top:8px">❓ مساعدة — عندك سؤال؟</button><button class="btn sec sm block" id="av_close" style="margin-top:8px">إغلاق ✕</button></div>` : ''}`;
+  const tog = () => { if (greet && !_avOpen) return openHelp(); _avOpen = !_avOpen; renderAvatarBar(); };
   $('#av_tap').onclick = tog; $('#av_bub').onclick = tog;
   const c = $('#av_close'); if (c) c.onclick = tog;
   const g = $('#av_go'); if (g) g.onclick = () => { _avOpen = false; setTimeout(renderAvatarBar, 0); };
