@@ -86,7 +86,7 @@ async function dayView() {
   if ($('#bk_now')) $('#bk_now').onclick = () => doBackup(dayView);
   if ($('#rs_first')) $('#rs_first').onclick = doRestore;
   app.querySelectorAll('[data-st]').forEach(b => b.onclick = async () => { await api(`/api/m/orders/${b.dataset.id}/status`, { status: b.dataset.st }); toast('تم ✅'); dayView(); });
-  app.querySelectorAll('[data-edit]').forEach(b => b.onclick = async () => { const o = D.orders.find(x => x.restaurant_id == b.dataset.edit); openDraft([{ restaurant_id: o.restaurant_id, items: Object.fromEntries(o.items.map(i => [i.product_id, i.qty])), note: o.note }], D.date); });
+  app.querySelectorAll('[data-edit]').forEach(b => b.onclick = async () => { const o = D.orders.find(x => x.restaurant_id == b.dataset.edit); openDraft([{ restaurant_id: o.restaurant_id, items: Object.fromEntries(o.items.map(i => [i.product_id, i.qty])), note: o.note, edit: true }], D.date); });
   $('#manual').onclick = () => openDraft([{ restaurant_id: null, items: {} }], dayDate === L.today ? addDays(L.today, 1) : dayDate);
   $('#parse').onclick = () => {
     const t = $('#otext').value.trim(); if (!t) return toast('اكتب أو احكي الطلبية أولاً');
@@ -135,6 +135,13 @@ async function openDraft(drafts, date, heard) {
     $('#dcancel').onclick = () => modal('');
     $('#dsave').onclick = async () => {
       if (drafts.some(d => !d.restaurant_id)) return toast('اختر اسم المطعم');
+      for (const d of drafts) {
+        const ex = existing[d.restaurant_id + date]; if (!ex || d.add) continue;
+        const rn = (L.restaurants.find(r => r.id == d.restaurant_id) || {}).name || '', old = ex.items.map(i => `${i.name} ${num(i.qty)}`).join('، ');
+        const empty = !Object.values(d.items).some(q => Number(q) > 0);
+        if (empty && !await ask({ title: 'متأكد بدك تحذف الطلبية؟', name: `طلبية ${rn}`, msg: `${fmtDate(date)}\n${old}` })) return;
+        if (!empty && !d.edit && !await ask({ title: 'في طلبية لهذا المطعم بنفس اليوم', name: `طلبية ${rn}`, msg: `الطلبية القديمة (${old}) رح تنمسح وتنحط مكانها الجديدة.\nلو بدك تزيد عليها اضغط «إلغاء» وعلّم «أضف للكمية الموجودة».`, yes: 'نعم، احذف القديمة واستبدل' })) return;
+      }
       try {
         for (const d of drafts) {
           const items = { ...d.items }; const ex = existing[d.restaurant_id + date];
@@ -269,7 +276,7 @@ async function statementView(rid) {
   <div class="total" style="border-color:var(--red)"><span class="n">المبلغ المستحق</span><span class="q" style="color:var(--red)">${sar(S.closing)}</span></div>`;
   const upd = () => { sessionStorage.st_from = $('#sf').value; sessionStorage.st_to = $('#stt').value; statementView(rid); };
   $('#sf').onchange = upd; $('#stt').onchange = upd; $('#spay').onclick = () => paymentForm(rid);
-  app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (!confirm('حذف هذه الدفعة؟')) return; await api('/api/m/finance/payments/' + b.dataset.del, null, 'DELETE'); statementView(rid); });
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { const l = S.lines.find(x => x.id == b.dataset.del) || {}; if (!await ask({ title: 'متأكد بدك تحذف الدفعة؟', name: `دفعة ${num(l.credit)} ريال — ${S.restaurant.name}`, msg: `${fmtDate(l.date)}${l.desc ? '\n' + l.desc : ''}` })) return; await api('/api/m/finance/payments/' + b.dataset.del, null, 'DELETE'); statementView(rid); });
 }
 async function expensesView() {
   const month = sessionStorage.ex_month || L.today.slice(0, 7);
@@ -295,7 +302,7 @@ function expenseForm(e) {
    ${e.id ? '<button class="btn red block" style="margin-top:8px" id="e_del">حذف</button>' : ''}
    <button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
   $('#e_save').onclick = async () => { try { await api('/api/m/finance/expenses', { id: e.id, category: $('#e_c').value, amount: $('#e_a').value, date: $('#e_d').value, supplier: $('#e_s').value, paid: !$('#e_p').checked, note: $('#e_n').value }); modal(''); toast('تم الحفظ ✅'); expensesView(); } catch (x) { toast(x.message); } };
-  if (e.id) $('#e_del').onclick = async () => { if (!confirm('حذف المصروف؟')) return; await api('/api/m/finance/expenses/' + e.id, null, 'DELETE'); modal(''); expensesView(); };
+  if (e.id) $('#e_del').onclick = async () => { if (!await ask({ title: 'متأكد بدك تحذف المصروف؟', name: `${e.category} — ${sar(e.amount)}`, msg: fmtDate(e.date) + (e.supplier ? ' • ' + e.supplier : '') })) return; await api('/api/m/finance/expenses/' + e.id, null, 'DELETE'); modal(''); expensesView(); };
 }
 
 // ================= الزبائن =================
@@ -314,7 +321,7 @@ async function customersView() {
   $('#sd').onchange = () => { sessionStorage.stop_days = $('#sd').value; customersView(); };
   $('#radd').onclick = () => restaurantForm({ active: 1 });
   app.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => restaurantForm(R.find(r => r.id == b.dataset.ed)));
-  app.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => { await api(`/api/m/restaurants/${b.dataset.act}/active`, { active: b.dataset.v === '1' }); L = await api('/api/m/lookups'); toast('تم ✅'); customersView(); });
+  app.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => { const r = R.find(x => x.id == b.dataset.act) || {}; if (b.dataset.v === '0' && !await ask({ title: 'متأكد بدك توقف الزبون؟', name: r.name, msg: 'ما رح يطلع بالطلبيات الجديدة. حساباته بتضل، وبتقدر ترجّعه بأي وقت.', yes: 'نعم، أوقفه' })) return; await api(`/api/m/restaurants/${b.dataset.act}/active`, { active: b.dataset.v === '1' }); L = await api('/api/m/lookups'); toast('تم ✅'); customersView(); });
 }
 function restaurantForm(r) {
   r = { ...r };
@@ -376,7 +383,7 @@ function doRestore() {
     let d; try { d = JSON.parse(await f.text()); } catch (e) { return toast('الملف مش صحيح'); }
     if (!d || d.app !== 'talabiyat') return toast('الملف مش نسخة احتياطية من طلبيات');
     const when = d.exported_at ? fmtDate(String(d.exported_at).slice(0, 10)) : '';
-    if (!confirm(`استعادة النسخة ${when}؟\n(${(d.restaurants || []).length} زبون، ${(d.orders || []).length} طلبية، ${(d.payments || []).length} دفعة)\n\nتنبيه: البيانات الحالية على الجوال رح تنمسح وتنحط مكانها النسخة. الرقم السري الحالي بيضل نفسه.`)) return;
+    if (!await ask({ title: 'متأكد بدك تستعيد النسخة؟', name: `نسخة ${when || 'احتياطية'} — ${(d.restaurants || []).length} زبون، ${(d.orders || []).length} طلبية، ${(d.payments || []).length} دفعة`, msg: 'البيانات الحالية على الجوال رح تنمسح وتنحط مكانها هاي النسخة. الرقم السري الحالي بيضل نفسه.', yes: 'نعم، احذف الحالية واستعِد' })) return;
     try { await api('/api/m/restore', { data: d }); toast('تمت الاستعادة ✅'); setTimeout(() => location.reload(), 600); } catch (e) { toast(e.message); }
   };
   document.body.appendChild(inp); inp.click();
@@ -408,7 +415,7 @@ async function recipeForm(p) {
     M.querySelectorAll('[data-i]').forEach(e => e.onchange = () => lines[e.dataset.i].ingredient_id = Number(e.value));
     M.querySelectorAll('[data-q]').forEach(e => e.oninput = () => lines[e.dataset.q].qty = Number(e.value.replace(',', '.')) || 0);
     M.querySelectorAll('[data-u]').forEach(e => e.onchange = () => lines[e.dataset.u].unit = e.value);
-    M.querySelectorAll('[data-x]').forEach(e => e.onclick = () => { lines.splice(e.dataset.x, 1); render(); });
+    M.querySelectorAll('[data-x]').forEach(e => e.onclick = async () => { const ing = ING.find(i => i.id == lines[e.dataset.x].ingredient_id); if (!await ask({ title: 'متأكد بدك تشيل المادة من الوصفة؟', name: ing ? ing.name : '', msg: `من وصفة ${p.name}`, yes: 'نعم، شيلها' })) return; lines.splice(e.dataset.x, 1); render(); });
     const a = $('#r_add'); if (a) a.onclick = () => { lines.push({ ingredient_id: ING[0].id, qty: 0, unit: 'غرام' }); render(); };
     $('#r_s').onclick = async () => { try { await api('/api/m/recipes/' + p.id, { lines }); modal(''); toast('تم الحفظ ✅'); productsView(); } catch (e) { toast(e.message); } };
   }
@@ -448,6 +455,7 @@ async function ingredientsView() {
     ['#i_u', '#i_bu', '#i_c', '#i_q', '#i_bt', '#i_pk'].forEach(k => { $(k).oninput = upd; $(k).onchange = upd; }); upd();
     $('#i_s').onclick = async () => { try {
       if (!bu()) throw new Error('اكتب الوحدة');
+      if (i.id && i.active !== 0 && !$('#i_a').checked && !await ask({ title: 'متأكد إن المادة مش مستخدمة؟', name: i.name, msg: 'رح تختفي من الوصفات الجديدة والمخزون. بتقدر ترجّعها بأي وقت.', yes: 'نعم، أوقفها' })) return;
       await api('/api/m/ingredients', { id: i.id, name: $('#i_n').value, unit: $('#i_u').value, buy_price: $('#i_c').value, buy_qty: $('#i_q').value, buy_unit: bu(), pack: $('#i_pk').value, active: $('#i_a').checked });
       modal(''); toast('تم الحفظ ✅'); ingredientsView(); } catch (e) { toast(e.message); } };
   };
@@ -476,7 +484,7 @@ function productForm(p) {
    ${p.lines && p.lines.length ? `<div class="mut" style="margin-top:6px">للمعلومة فقط: تكلفة ال${esc(p.unit)} من الوصفة ${sar(p.cost_per_unit)} — السعر بتحدده انت.</div>` : ''}
    <label style="display:flex;gap:10px;align-items:center;font-size:19px;color:inherit"><input type="checkbox" id="p_a" style="width:28px;height:28px" ${p.active ? 'checked' : ''}> ظاهر في الطلبات</label>
    <div style="height:12px"></div><button class="btn block" id="p_s">حفظ</button><button class="btn sec block" style="margin-top:8px" data-close>إلغاء</button>`);
-  $('#p_s').onclick = async () => { try { await api('/api/m/products', { id: p.id, name: $('#p_n').value, unit: $('#p_u').value, price: $('#p_pr').value, active: $('#p_a').checked }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); productsView(); } catch (e) { toast(e.message); } };
+  $('#p_s').onclick = async () => { try { if (p.id && p.active && !$('#p_a').checked && !await ask({ title: 'متأكد بدك تخفي الصنف؟', name: p.name, msg: 'ما رح يطلع بالطلبيات الجديدة. بتقدر ترجّعه بأي وقت.', yes: 'نعم، أخفِه' })) return; await api('/api/m/products', { id: p.id, name: $('#p_n').value, unit: $('#p_u').value, price: $('#p_pr').value, active: $('#p_a').checked }); L = await api('/api/m/lookups'); modal(''); toast('تم الحفظ ✅'); productsView(); } catch (e) { toast(e.message); } };
 }
 async function settingsView() {
   const S = await api('/api/m/settings');
@@ -500,7 +508,7 @@ function bindPinChange() {
     const n = $('#pw_n').value.trim(), n2 = $('#pw_n2').value.trim();
     if (!/^\d{4,8}$/.test(n)) return toast('الرقم الجديد لازم يكون من 4 إلى 8 أرقام');
     if (n !== n2) return toast('الرقم الجديد والتأكيد مش متطابقين');
-    if (!confirm('أكيد بدك تغيّر الرقم السري؟')) return;
+    if (!await ask({ title: 'متأكد بدك تغيّر الرقم السري؟', msg: 'الرقم القديم ما رح يشتغل بعد هيك. احفظ الرقم الجديد منيح.', yes: 'نعم، غيّر الرقم' })) return;
     try { await api('/api/m/pin', { current: $('#pw_c').value.trim(), new_pin: n, confirm: n2 }); ['#pw_c', '#pw_n', '#pw_n2'].forEach(x => $(x).value = ''); toast('تم تغيير الرقم السري ✅ احفظه منيح'); } catch (e) { toast(e.message); }
   };
 }

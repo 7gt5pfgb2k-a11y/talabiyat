@@ -51,3 +51,18 @@ function installWarning() {
    </ol>
    <p class="mut" style="margin:0">البيانات اللي بتدخلها هون في المتصفح (Safari) <b>منفصلة</b> عن بيانات التطبيق المثبّت وما بتنتقل له.</p></div>`;
 }
+
+// نافذة «متأكد؟» بأزرار كبيرة — بدل confirm() — كل النصوص بتنعرض بعد esc()
+function ask({ title = 'متأكد؟', name = '', msg = '', yes = 'نعم، احذف', no = 'إلغاء' } = {}) {
+  return new Promise(res => {
+    const old = document.getElementById('ask'); if (old) old.remove();
+    const w = document.createElement('div'); w.className = 'modal ask'; w.id = 'ask';
+    w.innerHTML = `<div class="sheet" role="alertdialog" aria-modal="true" aria-labelledby="ask_t"><h2 id="ask_t" style="margin-top:0">⚠️ ${esc(title)}</h2>${name ? `<div class="askname">${esc(name)}</div>` : ''}${msg ? `<div class="askmsg">${esc(msg)}</div>` : ''}<button class="btn danger block" id="ask_yes">${esc(yes)}</button><button class="btn sec block" id="ask_no" style="margin-top:10px">${esc(no)}</button></div>`;
+    const key = e => { if (e.key === 'Escape') done(false); };
+    const done = v => { w.remove(); document.removeEventListener('keydown', key); res(v); };
+    w.querySelector('#ask_yes').onclick = () => done(true);
+    w.querySelector('#ask_no').onclick = () => done(false);
+    w.onclick = e => { if (e.target === w) done(false); };
+    document.addEventListener('keydown', key); document.body.appendChild(w); w.querySelector('#ask_no').focus();
+  });
+}

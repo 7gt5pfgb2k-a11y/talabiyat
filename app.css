@@ -128,3 +128,9 @@ nav.bottom a.on{color:var(--g);box-shadow:inset 0 4px 0 var(--saf)}
 .modal .sheet{border-top:4px solid var(--saf)}
 th{background:var(--g2)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}.btn:active,.qty button:active{transform:none}}
+
+.modal.ask{z-index:35;align-items:center}.modal.ask .sheet{border-radius:20px;max-width:520px;margin:12px;width:calc(100% - 24px);padding:20px}
+.askname{font-size:22px;font-weight:800;background:#fff;border:2px solid var(--red);border-radius:12px;padding:12px;margin:8px 0;word-break:break-word}
+.askmsg{font-size:18px;color:var(--mut);white-space:pre-line;margin:6px 0 14px}
+.btn.danger{background:var(--red);color:#fff;min-height:68px;font-size:22px}
+.grid2>*{min-width:0}input[type=date],input[type=month]{min-width:0;max-width:100%}
