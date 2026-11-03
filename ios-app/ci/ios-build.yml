@@ -1,0 +1,77 @@
+# لتفعيله: انسخ هالملف إلى .github/workflows/ios-build.yml على فرع ios-build
+# (توكن gh الحالي ناقصه صلاحية workflow فما قدرت أرفعه هناك مباشرة)
+# بناء iOS بدون توقيع — للتأكد إنه المشروع بيتبنى على Mac سحابي (مجاني للمستودعات العامة)
+name: iOS build (unsigned)
+
+on:
+  push:
+    branches: [ios-build]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ios-app/package-lock.json
+
+      - name: Xcode version
+        run: xcodebuild -version && swift --version
+
+      - name: Install
+        run: npm ci
+
+      - name: Build web assets + cap sync
+        run: npm run sync
+
+      - name: Check Info.plist / privacy manifest
+        run: |
+          plutil -lint ios/App/App/Info.plist ios/App/App/PrivacyInfo.xcprivacy
+          plutil -lint ios/App/App/en.lproj/InfoPlist.strings ios/App/App/ar.lproj/InfoPlist.strings
+          test -f ios/App/App/public/native.js
+          grep -q native.js ios/App/App/public/index.html
+
+      - name: Build for simulator (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme App \
+            -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/sim \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 80
+
+      - name: Archive for device (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme App \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive | tail -n 80
+          APP=build/App.xcarchive/Products/Applications/App.app
+          ls -la "$APP"
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          test -f "$APP/Assets.car"
+          plutil -p "$APP/Info.plist" | head -60
+          mkdir -p build/Payload && cp -R "$APP" build/Payload/
+          (cd build && zip -qry talabiyat-unsigned.ipa Payload)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talabiyat-ios-unsigned
+          path: ios-app/build/talabiyat-unsigned.ipa
+          retention-days: 14

@@ -1,0 +1,25 @@
+{
+  "appId": "app.talabiyat",
+  "appName": "طلبيات",
+  "webDir": "www",
+  "ios": {
+    "appendUserAgent": "TalabiyatIOS/1.0",
+    "backgroundColor": "#3D6B2B",
+    "contentInset": "never",
+    "scrollEnabled": true,
+    "allowsLinkPreview": false,
+    "limitsNavigationsToAppBoundDomains": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "launchAutoHide": true,
+      "backgroundColor": "#3D6B2B",
+      "showSpinner": false,
+      "iosSpinnerStyle": "small"
+    },
+    "StatusBar": { "style": "DARK", "overlaysWebView": true },
+    "LocalNotifications": { "iconColor": "#3D6B2B" }
+  }
+}

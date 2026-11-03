@@ -1,0 +1,39 @@
+# بديل لـ GitHub Actions (اختياري): Codemagic — 500 دقيقة Mac مجاناً بالشهر لحساب شخصي.
+# قبل الاستعمال: Codemagic → Team settings → Integrations → Developer Portal → ضيف مفتاح API
+# باسم: talabiyat-asc   (نفس المفتاح اللي بتعمله في App Store Connect، دور Admin)
+workflows:
+  ios-testflight:
+    name: Talabiyat iOS → TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: talabiyat-asc
+    environment:
+      node: 22
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.talabiyat
+    triggering:
+      events: []   # يدوي فقط (Start new build)
+    scripts:
+      - name: Install + build web + cap sync
+        working_directory: ios-app
+        script: |
+          npm ci
+          npm run sync
+      - name: Use signing profiles
+        working_directory: ios-app
+        script: xcode-project use-profiles --project ios/App/App.xcodeproj
+      - name: Build IPA
+        working_directory: ios-app
+        script: |
+          cd ios/App
+          agvtool new-version -all $(($BUILD_NUMBER + 100))
+          xcode-project build-ipa --project App.xcodeproj --scheme App
+    artifacts:
+      - ios-app/ios/App/build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

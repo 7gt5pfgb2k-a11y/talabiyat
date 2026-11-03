@@ -1,0 +1,3 @@
+/* iOS فقط: الشريط الأخضر يمتد تحت شريط الحالة */
+header.top{padding-top:calc(12px + env(safe-area-inset-top))}
+html{-webkit-text-size-adjust:100%}
