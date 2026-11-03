@@ -1,0 +1,84 @@
+# ⛔ معطّل عن قصد. هاد قالب البناء الموقّع + الرفع لـ TestFlight.
+# لتفعيله (بعد ما تدفع اشتراك Apple وتعمل مفتاح API):
+#   1) انسخ هالملف إلى .github/workflows/ios-testflight.yml
+#   2) ضيف الأسرار في GitHub → Settings → Secrets and variables → Actions:
+#        ASC_KEY_ID        (Key ID من App Store Connect)
+#        ASC_ISSUER_ID     (Issuer ID)
+#        ASC_KEY_P8        (محتوى ملف AuthKey_XXXX.p8 كامل، مع سطور BEGIN/END)
+#        APPLE_TEAM_ID     (Team ID من developer.apple.com → Membership)
+#   3) Actions → "iOS TestFlight" → Run workflow
+# المفتاح لازم يكون Team key بدور Admin عشان Xcode يقدر يعمل شهادة التوزيع والبروفايل لحاله (cloud signing).
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    # بشتغل بس لما تختار الفرع ios-build (ما بلمس main ولا الموقع)
+    if: github.ref == 'refs/heads/ios-build'
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ios-app
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ios-app/package-lock.json
+      - run: npm ci
+      - run: npm run sync
+
+      - name: Write App Store Connect API key (from secret, never printed)
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: Archive (automatic cloud signing)
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme App \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            archive | tail -n 80
+
+      - name: Export + upload to App Store Connect (TestFlight)
+        run: |
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath build/App.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" | tail -n 60
+
+      - name: Remove key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
