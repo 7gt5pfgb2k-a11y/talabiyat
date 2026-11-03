@@ -98,4 +98,135 @@
       a.onclick = privacy; h.parentNode.appendChild(a);
     }).observe(root, { childList: true, subtree: true });
   });
+
+  // 6) بيانات تجريبية (اختيارية): زر على الشاشة الفاضية بس — ما بتنضاف لحالها أبداً، وبتنحذف بضغطة
+  var DEMO_KEY = 'talabiyat_demo_snapshot';
+  function dbNow() { try { return JSON.parse(window.Store.exportJson()); } catch (_) { return null; } }
+  function isEmpty(d) { return d && !d.restaurants.length && !d.orders.length && !d.ingredients.length && !d.payments.length && !d.expenses.length; }
+  async function loadDemo() {
+    var before = dbNow(); if (!isEmpty(before)) { window.toast && toast('في بيانات حقيقية — ما بنضيف تجريبي'); return; }
+    if (!confirm('بنضيف بيانات تجريبية (زبائن وطلبيات ومخزون) عشان تشوف كيف التطبيق بشتغل.\nبتقدر تحذفها كلها بضغطة من الشريط اللي فوق.\n\nLoad demo data? You can remove it with one tap.')) return;
+    localStorage.setItem(DEMO_KEY, JSON.stringify(before));
+    var A = window.Store.api, T = window.Store.today();
+    var add = function (d, n) { var x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+    try {
+      var P = (await A('/api/m/lookups')).products;
+      var pid = function (i) { return P[i] ? P[i].id : null; };
+      if (P.length < 2) { await A('/api/m/products', { name: 'ورق العنب', unit: 'حبة', price: 0.5 }); await A('/api/m/products', { name: 'الملفوف', unit: 'حبة', price: 0.6 }); P = (await A('/api/m/lookups')).products; }
+      await A('/api/m/products', { name: 'الكبة', unit: 'حبة', price: 1.5 });
+      P = (await A('/api/m/lookups')).products;
+      var R = [['مطعم الأصيل (تجريبي)', 24.7136, 46.6753, '0500000001'], ['مطعم السرايا (تجريبي)', 24.7292, 46.6512, '0500000002'], ['البيت الشامي (تجريبي)', 24.6981, 46.7012, '0500000003'], ['ليالي حلب (تجريبي)', 24.7420, 46.6900, '0500000004']];
+      for (var i = 0; i < R.length; i++) await A('/api/m/restaurants', { name: R[i][0], lat: R[i][1], lng: R[i][2], phone: R[i][3], address: 'عنوان تجريبي' });
+      var rest = (await A('/api/m/lookups')).restaurants.map(function (r) { return r.id; });
+      var ing = [['ورق عنب', 'كغ', 150, 20, 'كغ'], ['أرز مصري', 'كغ', 95, 10, 'كغ'], ['لحم مفروم', 'كغ', 42, 1, 'كغ'], ['ملفوف', 'كغ', 6, 1, 'كغ']];
+      for (i = 0; i < ing.length; i++) await A('/api/m/ingredients', { name: ing[i][0], unit: ing[i][1], buy_price: ing[i][2], buy_qty: ing[i][3], buy_unit: ing[i][4] });
+      var after = dbNow(), I = after.ingredients.map(function (x) { return x.id; });
+      await A('/api/m/recipes/' + pid(0), { lines: [{ ingredient_id: I[0], qty: 6, unit: 'غرام' }, { ingredient_id: I[1], qty: 8, unit: 'غرام' }] });
+      await A('/api/m/recipes/' + pid(1), { lines: [{ ingredient_id: I[3], qty: 15, unit: 'غرام' }, { ingredient_id: I[2], qty: 5, unit: 'غرام' }] });
+      for (var d = -6; d <= 1; d++) {
+        var date = add(T, d);
+        for (var r = 0; r < rest.length; r++) {
+          if (d < 0 && (d + r) % 3 === 0) continue;
+          var items = [{ product_id: pid(0), qty: 100 + ((r * 37 + d * 11 + 400) % 4 + 1) * 50 }, { product_id: pid(1), qty: 50 + (r % 3) * 50 }];
+          if (r % 2 === 0 && pid(2)) items.push({ product_id: pid(2), qty: 40 + r * 10 });
+          await A('/api/m/order', { restaurant_id: rest[r], delivery_date: date, items: items, note: d === 0 && r === 1 ? 'ملاحظة تجريبية' : '' });
+        }
+        if (d < 0) { var D = await A('/api/m/day?date=' + date); for (var k = 0; k < D.orders.length; k++) await A('/api/m/orders/' + D.orders[k].id + '/status', { status: 'delivered' }); }
+      }
+      for (r = 0; r < rest.length; r++) await A('/api/m/finance/payments', { restaurant_id: rest[r], amount: 300 + r * 150, date: add(T, -2), method: 'نقدي' });
+      await A('/api/m/finance/expenses', { date: add(T, -2), category: 'مواد خام', amount: 640, supplier: 'مورد تجريبي', paid: true });
+      var st = [70, 30, 4, 45];
+      for (i = 0; i < I.length; i++) await A('/api/m/stock/' + I[i], { kind: 'count', qty: st[i], date: T });
+      await A('/api/m/backup-done', {});
+    } catch (e) { console.error(e); }
+    location.hash = '#/day'; location.reload();
+  }
+  async function removeDemo() {
+    var snap = localStorage.getItem(DEMO_KEY); if (!snap) return;
+    if (!confirm('نحذف كل البيانات التجريبية ونرجع التطبيق فاضي؟\n(أي اشي ضفته بعد التجربة كمان رح ينحذف)\n\nRemove all demo data?')) return;
+    try { await window.Store.api('/api/m/restore', { data: JSON.parse(snap) }); } catch (e) { alert(String((e && e.message) || e)); return; }
+    localStorage.removeItem(DEMO_KEY); location.hash = '#/day'; location.reload();
+  }
+  window.__loadDemo = loadDemo; window.__removeDemo = removeDemo;
+
+  // 7) تذكير يومي أصلي (إشعار محلي متكرر الساعة 8 المسا): «جهّز طلبيات بكرة»
+  var REM_KEY = 'talabiyat_daily_reminder', REM_ID = 9001;
+  function remOn() { return localStorage.getItem(REM_KEY) === '1'; }
+  async function toggleReminder(btn) {
+    try {
+      if (remOn()) {
+        await call('LocalNotifications', 'cancel', { notifications: [{ id: REM_ID }] });
+        localStorage.removeItem(REM_KEY);
+      } else {
+        var p = await call('LocalNotifications', 'requestPermissions');
+        if (p.display !== 'granted') { alert('اسمح بالإشعارات من الإعدادات ← طلبيات ← الإشعارات'); return; }
+        await call('LocalNotifications', 'schedule', { notifications: [{ id: REM_ID, title: 'طلبيات 📋', body: 'جهّز طلبيات بكرة وشوف المخزون', schedule: { on: { hour: 20, minute: 0 }, allowWhileIdle: true } }] });
+        localStorage.setItem(REM_KEY, '1');
+      }
+      tap(); if (window.toast) toast(remOn() ? '⏰ التذكير اليومي شغّال (8 المسا) ✅' : 'التذكير اليومي انطفى');
+    } catch (e) { alert(String((e && e.message) || e)); }
+    if (btn) btn.textContent = remLabel();
+  }
+  function remLabel() { return remOn() ? '⏰ التذكير اليومي (8 المسا): شغّال — اضغط للإطفاء' : '⏰ ذكّرني كل يوم 8 المسا بطلبيات بكرة'; }
+
+  // 8) خلفية الخريطة (OpenStreetMap) مطفأة افتراضياً — ما بنتصل بأي سيرفر إلا لما تشغّلها
+  var TILE_KEY = 'talabiyat_map_tiles';
+  function tilesOn() { return localStorage.getItem(TILE_KEY) === '1'; }
+  function wrapLeaflet(L) {
+    if (!L || L.__np) return; L.__np = true;
+    var orig = L.tileLayer;
+    L.tileLayer = function () {
+      var t = orig.apply(L, arguments), oa = t.addTo.bind(t);
+      t.addTo = function (m) {
+        if (tilesOn()) return oa(m);
+        var c = m.getContainer(), b = document.createElement('button');
+        b.type = 'button'; b.className = 'btn sm';
+        b.style.cssText = 'position:absolute;z-index:1000;left:50%;top:50%;transform:translate(-50%,-50%);max-width:85%;white-space:normal';
+        b.textContent = '🗺️ اعرض خلفية الخريطة (بتنحمّل من OpenStreetMap)';
+        if (L.DomEvent) { L.DomEvent.disableClickPropagation(b); }
+        b.onclick = function (e) { e.stopPropagation(); localStorage.setItem(TILE_KEY, '1'); oa(m); b.remove(); };
+        c.appendChild(b); return t;
+      };
+      return t;
+    };
+  }
+  var _L;
+  try { Object.defineProperty(window, 'L_', { configurable: true, get: function () { return _L; }, set: function (v) { _L = v; try { wrapLeaflet(v); } catch (_) {} } }); } catch (_) {}
+  function tileLabel() { return tilesOn() ? '🗺️ خلفية الخريطة: شغّالة — اضغط للإطفاء' : '🗺️ خلفية الخريطة: مطفأة (بدون اتصال بأي سيرفر)'; }
+
+  // 9) اهتزاز خفيف لما تتنقل بين التبويبات
+  function tap() { if (has('Haptics')) call('Haptics', 'impact', { style: 'LIGHT' }).catch(function () {}); }
+  window.addEventListener('hashchange', tap);
+
+  // أزرار الشاشة الفاضية + شريط التجربة + إعدادات «المزيد»
+  function decorate() {
+    var rs = document.getElementById('rs_first');
+    if (rs && !document.getElementById('np_demo') && !localStorage.getItem(DEMO_KEY) && isEmpty(dbNow())) {
+      var b = document.createElement('button'); b.type = 'button'; b.id = 'np_demo'; b.className = 'btn sm';
+      b.textContent = '🧪 تجربة ببيانات تجريبية (Demo)'; b.onclick = loadDemo;
+      rs.parentNode.appendChild(b);
+    }
+    var app = document.getElementById('app');
+    if (app && localStorage.getItem(DEMO_KEY) && !document.getElementById('np_demobar')) {
+      var bar = document.createElement('div'); bar.id = 'np_demobar'; bar.className = 'card';
+      bar.style.cssText = 'background:#fff4cc;border:1px solid #e0c35a;display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap';
+      bar.innerHTML = '<b>🧪 هاي بيانات تجريبية (Demo data)</b>';
+      var x = document.createElement('button'); x.type = 'button'; x.className = 'btn sec sm'; x.textContent = '🗑️ احذف التجريبي'; x.onclick = removeDemo;
+      bar.appendChild(x); app.insertBefore(bar, app.firstChild);
+    }
+    var h = document.getElementById('more_help');
+    if (h && !document.getElementById('np_rem') && has('LocalNotifications')) {
+      var r = document.createElement('button'); r.type = 'button'; r.id = 'np_rem'; r.className = 'btn block sec'; r.textContent = remLabel();
+      r.onclick = function () { toggleReminder(r); }; h.parentNode.appendChild(r);
+    }
+    if (h && !document.getElementById('np_tiles')) {
+      var t = document.createElement('button'); t.type = 'button'; t.id = 'np_tiles'; t.className = 'btn block sec'; t.textContent = tileLabel();
+      t.onclick = function () { if (tilesOn()) localStorage.removeItem(TILE_KEY); else localStorage.setItem(TILE_KEY, '1'); t.textContent = tileLabel(); tap(); };
+      h.parentNode.appendChild(t);
+    }
+  }
+  window.addEventListener('DOMContentLoaded', function () {
+    new MutationObserver(decorate).observe(document.getElementById('app') || document.body, { childList: true, subtree: true });
+    decorate();
+  });
 })();
