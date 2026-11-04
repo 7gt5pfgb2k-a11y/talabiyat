@@ -20,7 +20,8 @@
     "@capacitor/local-notifications": "^8.3.1",
     "@capacitor/share": "^8.0.3",
     "@capacitor/splash-screen": "^8.0.2",
-    "@capacitor/status-bar": "^8.0.4"
+    "@capacitor/status-bar": "^8.0.4",
+    "talabiyat-ai": "file:plugins/talabiyat-ai"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.6.0",
