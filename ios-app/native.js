@@ -374,7 +374,7 @@
       (hasCloud ? '<div class="card" style="margin-top:10px"><b>☁️ الذكاء بالإنترنت</b> — ' + (cloudOk() ? '✅ مسموح' : '⛔ مش مسموح') +
         '<div class="mut" style="margin-top:4px">الأفضل بفهم العربي واللهجات. بيبعت نص الطلبية وأسماء الأصناف والزبائن بس.</div>' +
         '<button class="btn sec sm" id="ai_cloud" style="margin-top:8px">' + (cloudOk() ? 'وقّف الذكاء بالإنترنت' : 'اسمح بالذكاء بالإنترنت') + '</button></div>' : '') +
-      (hasAI ? '<div class="card" style="margin-top:10px"><b>📱 Apple (على الجهاز)</b> — ' + h(AI_REASON[s.reason] || s.reason) +
+      (hasAI ? '<div class="card" style="margin-top:10px"><b>📱 Apple (على الجهاز)</b> — ' + h(s.available && !s.arabic ? '⚠️ موجود، بس لسا ما بيدعم العربي (Apple ما ضافته)' : (AI_REASON[s.reason] || s.reason)) +
         '<div class="mut" style="margin-top:4px">مجاني وبدون إنترنت. iOS ' + h(s.ios || '?') + ' · لغة الجهاز: ' + h(s.locale || '?') + ' · العربي: ' + (s.arabic ? '✅' : '❌') + '</div>' +
         (s.languages && s.languages.length ? '<details style="margin-top:6px"><summary class="mut">اللغات المدعومة (' + s.languages.length + ')</summary><div class="mut" dir="ltr">' + h(s.languages.join(', ')) + '</div></details>' : '') + '</div>' : '') +
       '<div class="mut" style="margin-top:8px">الترتيب: الذكاء بالإنترنت إذا مسموح وفي إنترنت، بعدين Apple إذا متوفر، وإلا الفهم العادي. التطبيق بيشتغل كامل بدون أي واحد منهم.</div>' +
@@ -466,7 +466,19 @@
       a.onclick = openAILab; h.parentNode.appendChild(a);
     }
   }
+  // فقاعة كلام «أحمد»: بتطلع كم ثانية لما تتغيّر الرسالة، بعدين بتختفي (الشخصية بتضل، والضغط عليها بيفتح التفاصيل)
+  // التنبيهات الحمرا بتضل ظاهرة.
+  var bubLast = '', bubTimer = null, bubHidden = false;
+  function foldBubble() {
+    var bar = document.getElementById('avbar'); if (!bar) return;
+    var bub = document.getElementById('av_bub'); if (!bub) return;
+    var msg = bub.textContent || '', red = /\bred\b/.test(bar.className), open = !!document.getElementById('av_panel');
+    if (msg !== bubLast || red || open) { bubLast = msg; bubHidden = false; clearTimeout(bubTimer); if (!red && !open) bubTimer = setTimeout(function () { bubHidden = true; foldBubble(); }, 6000); }
+    bub.style.display = bubHidden && !red && !open ? 'none' : '';
+  }
   window.addEventListener('DOMContentLoaded', function () {
+    var avb = document.getElementById('avbar');
+    if (avb) new MutationObserver(foldBubble).observe(avb, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     new MutationObserver(decorate).observe(document.getElementById('app') || document.body, { childList: true, subtree: true });
     decorate();
   });
