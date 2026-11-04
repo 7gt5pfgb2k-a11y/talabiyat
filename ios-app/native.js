@@ -199,7 +199,7 @@
   window.addEventListener('hashchange', tap);
 
   // 10) 🧪 فهم الطلبية بالذكاء — بثلاث طبقات، والتطبيق بيشتغل كامل بدونها:
-  //   أ) Claude عبر سيرفرنا الوسيط (بس بعد موافقة صريحة، وفي إنترنت) — الأفضل بالعربي
+  //   أ) الذكاء بالإنترنت عبر سيرفرنا الوسيط (Gemini أو Claude حسب السيرفر؛ بس بعد موافقة صريحة) — الأفضل بالعربي
   //   ب) نموذج Apple على الجهاز (iOS 26+، مجاني، بدون إنترنت) — لما يدعم اللغة
   //   ج) الفهم العادي parser.js — دايماً موجود
   // مطفأة افتراضياً. بتنشغل من «المزيد ← 🧪 الذكاء».
@@ -227,10 +227,21 @@
     timeout: 'الذكاء طوّل كتير',
     offline: 'ما في إنترنت',
     rate_limited: 'طلبات كتير ورا بعض، استنى دقيقة',
-    unauthorized: 'إعداد السيرفر غلط', server_key_invalid: 'مفتاح Claude بالسيرفر غلط',
+    unauthorized: 'إعداد السيرفر غلط', server_key_invalid: 'مفتاح الذكاء بالسيرفر غلط',
     no_engine: 'ما في ذكاء متاح'
   };
-  var ENGINE_LABEL = { cloud: '☁️ Claude', apple: '📱 Apple' };
+  var ENGINE_LABEL = { cloud: '☁️ الذكاء بالإنترنت', apple: '📱 Apple' };
+  // مين المزوّد؟ السيرفر بيقول (عشان شاشة الموافقة تسمّيه صح)
+  var PROVIDERS = {
+    gemini: { name: 'Google Gemini', co: 'Google', extra: 'بالخدمة المجانية، Google ممكن تستعمل هالنصوص لتحسين خدماتها، وممكن يقرأها موظفين عندها للمراجعة. لا تكتب بالطلبية أشياء خاصة متل أرقام بطاقات أو كلمات سر.', link: 'https://ai.google.dev/gemini-api/terms' },
+    claude: { name: 'Claude', co: 'Anthropic', extra: 'Anthropic ما بتستعمل هالبيانات لتدريب نماذجها.', link: 'https://www.anthropic.com/legal/privacy' }
+  };
+  var cloudProvider = null;
+  function getProvider() {
+    if (cloudProvider || !hasCloud) return Promise.resolve(cloudProvider);
+    return fetch(CLOUD.url.replace(/\/$/, '') + '/health').then(function (r) { return r.json(); })
+      .then(function (j) { cloudProvider = PROVIDERS[j.provider] ? j.provider : null; return cloudProvider; }).catch(function () { return null; });
+  }
   function getAIStatus() {
     if (!hasAI) return Promise.resolve({ available: false, reason: 'unavailable' });
     return call('TalabiyatAI', 'status').then(function (s) { aiStatus = s; return s; }).catch(function () { return { available: false, reason: 'unavailable' }; });
@@ -319,15 +330,17 @@
   }, true);
 
   // موافقة صريحة قبل ما نبعت أي شي برا الجوال (Apple 5.1.2)
-  function askCloudConsent() {
+  async function askCloudConsent() {
+    var pv = PROVIDERS[await getProvider()];
+    if (!pv) { alert('ما قدرت أوصل لسيرفر الذكاء. تأكد من الإنترنت وجرّب كمان مرة.'); return false; }
     return new Promise(function (resolve) {
       var ov = document.createElement('div'); ov.id = 'ai_consent';
       ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center';
       ov.innerHTML = '<div style="background:#fff;width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90%;overflow:auto">' +
-        '<div style="font-size:21px;font-weight:800;margin-bottom:8px">☁️ فهم الطلبية بـ Claude</div>' +
-        '<div style="line-height:1.8">لما تكبس «التالي»، التطبيق بيبعت عبر الإنترنت لخدمة <b>Claude</b> من شركة <b>Anthropic</b> (عن طريق سيرفر وسيط تبع التطبيق):<ul style="margin:6px 0;padding-inline-start:20px">' +
+        '<div style="font-size:21px;font-weight:800;margin-bottom:8px">☁️ فهم الطلبية بالذكاء</div>' +
+        '<div style="line-height:1.8">لما تكبس «التالي»، التطبيق بيبعت عبر الإنترنت لخدمة <b>' + h(pv.name) + '</b> من شركة <b>' + h(pv.co) + '</b> (عن طريق سيرفر وسيط تبع التطبيق):<ul style="margin:6px 0;padding-inline-start:20px">' +
         '<li>نص الطلبية اللي كتبته أو حكيته</li><li>أسماء الأصناف وأسماء الزبائن (بدون تلفونات ولا عناوين ولا مبالغ)</li></ul>' +
-        'الهدف بس فهم الطلبية. سيرفرنا ما بيخزّن شي، و Anthropic ما بتستعمل هالبيانات لتدريب نماذجها.<br>' +
+        'الهدف بس فهم الطلبية. سيرفرنا ما بيخزّن شي. ' + h(pv.extra) + ' <span class="mut" dir="ltr">' + h(pv.link) + '</span><br>' +
         'الحسابات والمخزون وكل باقي البيانات بتضل على الجوال.<br><span class="mut">بتقدر تطفيها بأي وقت من نفس الشاشة.</span></div>' +
         '<button class="btn block" id="ai_c_yes" style="margin-top:12px">موافق، شغّلها</button>' +
         '<button class="btn block sec" id="ai_c_no" style="margin-top:8px">لا، خليها على الجهاز بس</button></div>';
@@ -358,15 +371,15 @@
     ov.innerHTML = '<div style="background:#3D6B2B;color:#fff;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:19px;position:sticky;top:0"><span>🧪 الذكاء (تجريبي)</span><button id="ai_x" style="background:#fff;color:#3D6B2B;border:0;border-radius:10px;padding:8px 16px;font-size:18px;font-weight:700">رجوع</button></div>' +
       '<div style="padding:14px">' +
       '<button class="btn block ' + (aiOn() ? '' : 'sec') + '" id="ai_tg">' + (aiOn() ? '🧪 فهم الطلبية بالذكاء: شغّال — اضغط للإطفاء' : '🧪 شغّل فهم الطلبية بالذكاء') + '</button>' +
-      (hasCloud ? '<div class="card" style="margin-top:10px"><b>☁️ Claude (بالإنترنت)</b> — ' + (cloudOk() ? '✅ مسموح' : '⛔ مش مسموح') +
+      (hasCloud ? '<div class="card" style="margin-top:10px"><b>☁️ الذكاء بالإنترنت</b> — ' + (cloudOk() ? '✅ مسموح' : '⛔ مش مسموح') +
         '<div class="mut" style="margin-top:4px">الأفضل بفهم العربي واللهجات. بيبعت نص الطلبية وأسماء الأصناف والزبائن بس.</div>' +
-        '<button class="btn sec sm" id="ai_cloud" style="margin-top:8px">' + (cloudOk() ? 'وقّف استعمال Claude' : 'اسمح باستعمال Claude') + '</button></div>' : '') +
+        '<button class="btn sec sm" id="ai_cloud" style="margin-top:8px">' + (cloudOk() ? 'وقّف الذكاء بالإنترنت' : 'اسمح بالذكاء بالإنترنت') + '</button></div>' : '') +
       (hasAI ? '<div class="card" style="margin-top:10px"><b>📱 Apple (على الجهاز)</b> — ' + h(AI_REASON[s.reason] || s.reason) +
         '<div class="mut" style="margin-top:4px">مجاني وبدون إنترنت. iOS ' + h(s.ios || '?') + ' · لغة الجهاز: ' + h(s.locale || '?') + ' · العربي: ' + (s.arabic ? '✅' : '❌') + '</div>' +
         (s.languages && s.languages.length ? '<details style="margin-top:6px"><summary class="mut">اللغات المدعومة (' + s.languages.length + ')</summary><div class="mut" dir="ltr">' + h(s.languages.join(', ')) + '</div></details>' : '') + '</div>' : '') +
-      '<div class="mut" style="margin-top:8px">الترتيب: Claude إذا مسموح وفي إنترنت، بعدين Apple إذا متوفر، وإلا الفهم العادي. التطبيق بيشتغل كامل بدون أي واحد منهم.</div>' +
+      '<div class="mut" style="margin-top:8px">الترتيب: الذكاء بالإنترنت إذا مسموح وفي إنترنت، بعدين Apple إذا متوفر، وإلا الفهم العادي. التطبيق بيشتغل كامل بدون أي واحد منهم.</div>' +
       '<h2>قارن على نص</h2><textarea id="ai_t" rows="3" placeholder="مثال: السرايا ميتين ورق عنب و ١٠٠ ملفوف بكرة"></textarea>' +
-      '<button class="btn block" id="ai_go" style="margin-top:8px"' + (canRun ? '' : ' disabled') + '>قارن ▶</button>' + (canRun ? '' : '<div class="mut center">شغّل Claude أو Apple أول</div>') + '<div id="ai_out"></div>' +
+      '<button class="btn block" id="ai_go" style="margin-top:8px"' + (canRun ? '' : ' disabled') + '>قارن ▶</button>' + (canRun ? '' : '<div class="mut center">شغّل الذكاء بالإنترنت أو Apple أول</div>') + '<div id="ai_out"></div>' +
       '<div class="mut" style="margin-top:14px">سجل التجارب على هالجهاز: ' + stats.ok + ' نجحت · ' + stats.err + ' فشلت</div>' +
       (log.length ? '<button class="btn sec sm" id="ai_share" style="margin-top:6px">📤 شارك السجل (عشان نحسّن)</button> <button class="btn sec sm" id="ai_clr" style="margin-top:6px">🗑️ امسح السجل</button>' : '') +
       '</div>';
@@ -439,7 +452,7 @@
     var ot = document.getElementById('otext');
     if (ot && hasCloud && !cloudOk() && !document.getElementById('np_aioffer') && localStorage.getItem('talabiyat_ai_offer') !== 'no') {
       var of = document.createElement('div'); of.id = 'np_aioffer'; of.className = 'sample'; of.style.marginTop = '10px';
-      of.innerHTML = '<b>✨ جديد:</b> التطبيق صار يفهم الطلبيات الطويلة واللهجة أحسن بالذكاء (Claude).<div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="np_aiyes">شغّله</button><button type="button" class="btn sec sm" id="np_aino">لا شكراً</button></div>';
+      of.innerHTML = '<b>✨ جديد:</b> التطبيق صار يفهم الطلبيات الطويلة واللهجة أحسن بالذكاء.<div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="np_aiyes">شغّله</button><button type="button" class="btn sec sm" id="np_aino">لا شكراً</button></div>';
       ot.parentNode.appendChild(of);
       document.getElementById('np_aiyes').onclick = async function () {
         if (await askCloudConsent()) { localStorage.setItem(CLOUD_OK, '1'); localStorage.setItem(AI_KEY, '1'); window.toast && toast('✨ الذكاء شغّال ✅'); }

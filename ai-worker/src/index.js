@@ -1,14 +1,23 @@
-// سيرفر وسيط صغير (Cloudflare Worker) بين تطبيق «طلبيات» و Claude.
-// - مفتاح Claude محفوظ هون كسرّ (ANTHROPIC_API_KEY) وما بيطلع للتطبيق أبداً.
+// سيرفر وسيط صغير (Cloudflare Worker) بين تطبيق «طلبيات» والذكاء (Gemini أو Claude).
+// - المزوّد بيتحدد بالأسرار: إذا في GEMINI_API_KEY → Gemini (الباقة المجانية)، وإلا ANTHROPIC_API_KEY → Claude.
+//   لإجبار مزوّد: متغير PROVIDER = "gemini" أو "claude".
+// - المفاتيح محفوظة هون كأسرار وما بتطلع للتطبيق أبداً.
 // - التطبيق بيبعت: نص الطلبية + أسماء الأصناف والزبائن مع أرقامهم (بدون تلفونات ولا عناوين ولا حسابات).
 // - بيرجّع نفس شكل نتيجة نموذج Apple: { dayOffset, drafts: [{ restaurantId, note, lines: [{ productId, quantity, inKilo }] }] }
 // - ما بنخزّن أي شي.
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ApiError as GeminiApiError } from "@google/genai";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
-// أرخص نموذج حالياً. للترقية لاحقاً: غيّر هالسطر بس (مثلاً "claude-sonnet-5-5").
-const MODEL = "claude-haiku-5-5";
+// Claude: أرخص نموذج حالياً. للترقية: غيّر هالسطر (مثلاً "claude-sonnet-5-5").
+const CLAUDE_MODEL = "claude-haiku-5-5";
+// Gemini: Flash-Lite عنده أعلى حد يومي بالباقة المجانية. بيتغيّر بمتغير GEMINI_MODEL.
+const GEMINI_MODEL = "gemini-3.5-flash-lite";
+function pickProvider(env) {
+  if (env.PROVIDER === "gemini" || env.PROVIDER === "claude") return env.PROVIDER;
+  return env.GEMINI_API_KEY ? "gemini" : "claude";
+}
 
 const LIMITS = { text: 1500, products: 60, restaurants: 300, name: 80 };
 const ALLOWED_ORIGINS = ["capacitor://localhost", "http://localhost", "https://localhost"];
@@ -59,7 +68,10 @@ export default {
     EXTRA_ORIGIN = env.DEV_ORIGIN || ""; // للتجربة المحلية بس
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(origin) });
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, model: MODEL }, 200, origin);
+    if (request.method === "GET" && url.pathname === "/health") {
+      const provider = pickProvider(env);
+      return json({ ok: true, provider, model: provider === "gemini" ? (env.GEMINI_MODEL || GEMINI_MODEL) : CLAUDE_MODEL }, 200, origin);
+    }
     if (request.method !== "POST" || url.pathname !== "/parse-order") return json({ error: "not_found" }, 404, origin);
 
     if (!env.APP_TOKEN || request.headers.get("X-App-Token") !== env.APP_TOKEN) return json({ error: "unauthorized" }, 401, origin);
@@ -82,26 +94,64 @@ export default {
       `CUSTOMERS (id: name):\n${restaurants.map((r) => `${r.id}: ${r.name}`).join("\n") || "(none)"}\n\n` +
       `ORDER TEXT:\n<<<\n${text}\n>>>`;
 
-    // ANTHROPIC_BASE_URL للتجربة المحلية بس (wrangler dev)
-    const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, maxRetries: 1, timeout: 20_000 });
     const started = Date.now();
-    try {
-      const msg = await client.messages.parse({
-        model: MODEL,
-        max_tokens: 2048,
-        system: SYSTEM,
-        messages: [{ role: "user", content: prompt }],
-        output_config: { effort: "low", format: zodOutputFormat(OrderResult) },
-      });
-      if (msg.stop_reason === "refusal") return json({ error: "refused" }, 422, origin);
-      if (msg.stop_reason === "max_tokens" || !msg.parsed_output) return json({ error: "generation_failed" }, 502, origin);
-      return json({ ...msg.parsed_output, ms: Date.now() - started, model: MODEL }, 200, origin);
-    } catch (err) {
-      if (err instanceof Anthropic.RateLimitError) return json({ error: "rate_limited" }, 429, origin);
-      if (err instanceof Anthropic.AuthenticationError) return json({ error: "server_key_invalid" }, 500, origin);
-      if (err instanceof Anthropic.APIConnectionTimeoutError) return json({ error: "timeout" }, 504, origin);
-      if (err instanceof Anthropic.APIError) return json({ error: "upstream_" + (err.status || "error") }, 502, origin);
-      return json({ error: "server_error" }, 500, origin);
-    }
+    const provider = pickProvider(env);
+    const res = provider === "gemini" ? await askGemini(env, prompt) : await askClaude(env, prompt);
+    if (res.error) return json({ error: res.error }, res.status, origin);
+    return json({ ...res.data, ms: Date.now() - started, provider, model: res.model }, 200, origin);
   },
 };
+
+// ---- Claude ----
+async function askClaude(env, prompt) {
+  if (!env.ANTHROPIC_API_KEY) return { error: "server_key_invalid", status: 500 };
+  // ANTHROPIC_BASE_URL للتجربة المحلية بس (wrangler dev)
+  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, maxRetries: 1, timeout: 20_000 });
+  try {
+    const msg = await client.messages.parse({
+      model: CLAUDE_MODEL,
+      max_tokens: 2048,
+      system: SYSTEM,
+      messages: [{ role: "user", content: prompt }],
+      output_config: { effort: "low", format: zodOutputFormat(OrderResult) },
+    });
+    if (msg.stop_reason === "refusal") return { error: "refused", status: 422 };
+    if (msg.stop_reason === "max_tokens" || !msg.parsed_output) return { error: "generation_failed", status: 502 };
+    return { data: msg.parsed_output, model: CLAUDE_MODEL };
+  } catch (err) {
+    if (err instanceof Anthropic.RateLimitError) return { error: "rate_limited", status: 429 };
+    if (err instanceof Anthropic.AuthenticationError) return { error: "server_key_invalid", status: 500 };
+    if (err instanceof Anthropic.APIConnectionTimeoutError) return { error: "timeout", status: 504 };
+    if (err instanceof Anthropic.APIError) return { error: "upstream_" + (err.status || "error"), status: 502 };
+    return { error: "server_error", status: 500 };
+  }
+}
+
+// ---- Gemini ----
+const ORDER_JSON_SCHEMA = (() => { const j = z.toJSONSchema(OrderResult); delete j.$schema; return j; })();
+async function askGemini(env, prompt) {
+  if (!env.GEMINI_API_KEY) return { error: "server_key_invalid", status: 500 };
+  const model = env.GEMINI_MODEL || GEMINI_MODEL;
+  // GEMINI_BASE_URL للتجربة المحلية بس (wrangler dev)
+  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, httpOptions: { timeout: 20_000, ...(env.GEMINI_BASE_URL ? { baseUrl: env.GEMINI_BASE_URL } : {}) } });
+  try {
+    const r = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: { systemInstruction: SYSTEM, responseMimeType: "application/json", responseJsonSchema: ORDER_JSON_SCHEMA, temperature: 0, maxOutputTokens: 2048 },
+    });
+    let parsed;
+    try { parsed = OrderResult.safeParse(JSON.parse(r.text || "")); } catch { return { error: "generation_failed", status: 502 }; }
+    if (!parsed.success) return { error: "generation_failed", status: 502 };
+    return { data: parsed.data, model };
+  } catch (err) {
+    if (err instanceof GeminiApiError) {
+      if (err.status === 429) return { error: "rate_limited", status: 429 };
+      if (err.status === 400 && /api key/i.test(err.message)) return { error: "server_key_invalid", status: 500 };
+      if (err.status === 401 || err.status === 403) return { error: "server_key_invalid", status: 500 };
+      return { error: "upstream_" + err.status, status: 502 };
+    }
+    if (err && (err.name === "AbortError" || /timeout/i.test(String(err.message)))) return { error: "timeout", status: 504 };
+    return { error: "server_error", status: 500 };
+  }
+}
