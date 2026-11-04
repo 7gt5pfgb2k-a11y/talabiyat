@@ -17,7 +17,7 @@ jobs:
   testflight:
     # بشتغل بس لما تختار الفرع ios-build (ما بلمس main ولا الموقع)
     if: github.ref == 'refs/heads/ios-build'
-    runs-on: macos-15  # macos-26 كان عالق بالطابور (ضغط على أجهزة arm64)
+    runs-on: macos-15-intel  # أجهزة arm64 عليها طابور طويل؛ intel بتبني وبتوقّع عادي
     timeout-minutes: 60
     defaults:
       run:
