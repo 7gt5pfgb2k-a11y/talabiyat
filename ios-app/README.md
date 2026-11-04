@@ -20,8 +20,8 @@ cd ios-app && npm ci && npm run sync   # بعدها افتح ios/App/App.xcodepr
 - سجل التجارب (آخر 30) محفوظ على الجهاز بس، وفي زر لمشاركته يدوياً.
 - لاحقاً: نموذج Apple على Private Cloud Compute (مجاني ضمن Small Business Program) بنفس الواجهة.
 
-### ☁️ Claude (اختياري، بموافقة)
+### ☁️ الذكاء بالإنترنت (اختياري، بموافقة)
 - لما المستخدم يوافق، فهم الطلبية بيصير بذكاء بالإنترنت (حالياً Google Gemini المجاني، أو Claude) عبر سيرفر وسيط (`ai-worker/`، Cloudflare Worker).
-- الترتيب: Claude إذا مسموح وفي إنترنت، بعدين Apple على الجهاز، وإلا `parser.js`.
+- الترتيب: الذكاء بالإنترنت إذا مسموح وفي إنترنت، بعدين Apple على الجهاز، وإلا `parser.js`.
 - مخفي لحد ما ينعبّى `CLOUD.url` و `CLOUD.token` بـ `native.js`. شوف `ai-worker/README.md` للنشر.
 - بعد النشر حدّث خانة الخصوصية بـ App Store Connect: **User Content → Other User Content**، لـ App Functionality، مش مربوطة بالهوية، بدون تتبع.
