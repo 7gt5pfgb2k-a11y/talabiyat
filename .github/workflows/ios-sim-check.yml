@@ -1,0 +1,98 @@
+# فحص على محاكي iPhone الحقيقي (Xcode على Mac سحابي):
+#  1) بيسأل نموذج Apple (Foundation Models) عن اللغات اللي بيدعمها — هل العربي منهم؟
+#  2) بيبني التطبيق، بيشغّله على المحاكي، وبيطلّع صورة (مصغّرة، base64 بالسجل + artifact).
+name: iOS simulator check
+
+on:
+  push:
+    branches: [ios-build]
+    paths: [.github/workflows/ios-sim-check.yml]
+  workflow_dispatch:
+
+jobs:
+  sim:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          echo "Using ${X:-default}"; [ -n "$X" ] && sudo xcode-select -s "$X" || true
+          xcodebuild -version
+          xcrun simctl list runtimes | grep -i ios || true
+
+      - name: Boot an iPhone simulator (iOS 26)
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['devices']
+          rt=sorted([k for k in d if 'iOS-26' in k or 'iOS-27' in k], reverse=True)
+          for k in rt:
+              for x in d[k]:
+                  if x['name'].startswith('iPhone'): print(x['udid']); sys.exit()
+          ")
+          [ -n "$UDID" ] || { echo "::error::No iOS 26+ iPhone simulator"; exit 1; }
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl list devices | grep "$UDID"
+
+      - name: Ask Apple's on-device model which languages it supports
+        run: |
+          cat > langs.swift <<'SWIFT'
+          import Foundation
+          import FoundationModels
+          if #available(iOS 26.0, *) {
+              let m = SystemLanguageModel.default
+              print("AVAILABILITY: \(m.availability)")
+              let langs = m.supportedLanguages.map { $0.maxIdentifier }.sorted()
+              print("LANGUAGES (\(langs.count)): \(langs.joined(separator: ", "))")
+              print("ARABIC SUPPORTED: \(m.supportedLanguages.contains { $0.languageCode?.identifier == "ar" })")
+              print("supportsLocale(ar_SA): \(m.supportsLocale(Locale(identifier: "ar_SA")))")
+              print("supportsLocale(ar_JO): \(m.supportsLocale(Locale(identifier: "ar_JO")))")
+              print("supportsLocale(en_US): \(m.supportsLocale(Locale(identifier: "en_US")))")
+          }
+          SWIFT
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          xcrun --sdk iphonesimulator swiftc -target arm64-apple-ios26.0-simulator -sdk "$SDK" langs.swift -o langs
+          xcrun simctl spawn "$UDID" "$PWD/langs" | tee langs.txt
+          { echo '### Apple Foundation Models (simulator)'; echo '```'; cat langs.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ios-app/package-lock.json
+
+      - name: Build app for the simulator
+        working-directory: ios-app
+        run: |
+          npm ci && npm run sync
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination "id=$UDID" -derivedDataPath build/sim \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 20
+
+      - name: Install, launch, screenshot (Arabic device language)
+        working-directory: ios-app
+        run: |
+          xcrun simctl spawn "$UDID" defaults write -g AppleLanguages -array ar
+          xcrun simctl spawn "$UDID" defaults write -g AppleLocale ar_JO
+          APP=$(find build/sim -name 'App.app' -path '*iphonesimulator*' | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" app.talabiyat
+          sleep 12
+          mkdir -p shots
+          xcrun simctl io "$UDID" screenshot shots/launch.png
+          sips -Z 700 shots/launch.png --out shots/launch-small.png >/dev/null
+          echo "----BEGIN SCREENSHOT----"; base64 -i shots/launch-small.png; echo "----END SCREENSHOT----"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: simulator-check
+          path: |
+            langs.txt
+            ios-app/shots/
+          retention-days: 7
