@@ -1,0 +1,83 @@
+# بينشر سيرفر الذكاء (ai-worker) على Cloudflare. ما بيلمس التطبيق ولا الموقع.
+# الأسرار (GitHub → Settings → Secrets and variables → Actions → New repository secret):
+#   GEMINI_API_KEY         مفتاح Gemini من aistudio.google.com/apikey
+#   CLOUDFLARE_API_TOKEN   من dash.cloudflare.com → My Profile → API Tokens → Create Token → قالب "Edit Cloudflare Workers"
+#   CLOUDFLARE_ACCOUNT_ID  من dash.cloudflare.com → Workers & Pages → على اليمين "Account ID"
+# بعد ما تضيفهم: افتح آخر تشغيل لهالـ workflow واكبس "Re-run all jobs".
+name: Deploy AI worker
+
+on:
+  push:
+    branches: [ios-build]
+    paths: [ai-worker/**, .github/workflows/deploy-ai-worker.yml]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ai-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ai-worker
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check secrets
+        id: check
+        working-directory: .
+        run: |
+          missing=""
+          [ -n "$GEMINI_API_KEY" ] || missing="$missing GEMINI_API_KEY"
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "⏸️ Missing secrets:$missing — add them, then Re-run this job." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ai-worker/package-lock.json
+
+      - name: Install
+        if: steps.check.outputs.ready == 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          set -o pipefail
+          npx wrangler deploy 2>&1 | tee "$RUNNER_TEMP/deploy.log"
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1)
+          if [ -z "$URL" ]; then
+            echo "::error::No workers.dev URL. Open dash.cloudflare.com → Workers & Pages once to choose a workers.dev subdomain, then Re-run."
+            exit 1
+          fi
+          echo "URL=$URL" >> "$GITHUB_ENV"
+
+      - name: Set Gemini key on the worker
+        if: steps.check.outputs.ready == 'true'
+        run: printf '%s' "$GEMINI_API_KEY" | npx wrangler secret put GEMINI_API_KEY
+
+      - name: Health check
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "$URL/health"; then echo; echo "✅ AI worker live: $URL" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::Worker did not answer /health"; exit 1

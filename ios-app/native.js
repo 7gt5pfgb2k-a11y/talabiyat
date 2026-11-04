@@ -203,9 +203,9 @@
   //   ب) نموذج Apple على الجهاز (iOS 26+، مجاني، بدون إنترنت) — لما يدعم اللغة
   //   ج) الفهم العادي parser.js — دايماً موجود
   // مطفأة افتراضياً. بتنشغل من «المزيد ← 🧪 الذكاء».
-  var CLOUD = { url: '', token: '' }; // بينعبّوا بعد نشر ai-worker (شوف ai-worker/README.md)
+  var CLOUD = { url: '', token: '' }; // url بينعبّى بعد نشر ai-worker؛ token اختياري مع Gemini (شوف ai-worker/README.md)
   var AI_KEY = 'talabiyat_ai_parse', AI_LOG = 'talabiyat_ai_log', CLOUD_OK = 'talabiyat_ai_cloud_consent';
-  var hasAI = has('TalabiyatAI'), hasCloud = !!(CLOUD.url && CLOUD.token), aiStatus = null;
+  var hasAI = has('TalabiyatAI'), hasCloud = !!CLOUD.url, aiStatus = null;
   function aiOn() { return localStorage.getItem(AI_KEY) === '1'; }
   function cloudOk() { return hasCloud && localStorage.getItem(CLOUD_OK) === '1'; }
   function anyAI() { return hasAI || hasCloud; }
@@ -256,7 +256,7 @@
     try {
       var r = await fetch(CLOUD.url.replace(/\/$/, '') + '/parse-order', {
         method: 'POST', signal: ctl ? ctl.signal : undefined,
-        headers: { 'Content-Type': 'application/json', 'X-App-Token': CLOUD.token },
+        headers: CLOUD.token ? { 'Content-Type': 'application/json', 'X-App-Token': CLOUD.token } : { 'Content-Type': 'application/json' },
         // بس الأسماء والأرقام — ما في تلفونات ولا عناوين ولا حسابات
         body: JSON.stringify({ text: text, products: products.map(function (p) { return { id: p.id, name: p.name, unit: p.unit }; }), restaurants: rests.map(function (x) { return { id: x.id, name: x.name }; }) })
       });

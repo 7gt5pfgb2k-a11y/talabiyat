@@ -74,7 +74,9 @@ export default {
     }
     if (request.method !== "POST" || url.pathname !== "/parse-order") return json({ error: "not_found" }, 404, origin);
 
-    if (!env.APP_TOKEN || request.headers.get("X-App-Token") !== env.APP_TOKEN) return json({ error: "unauthorized" }, 401, origin);
+    // مفتاح التطبيق: إجباري مع Claude (مدفوع). مع Gemini المجاني اختياري (أسوأ شي ممكن حدا يستهلك الحد اليومي المجاني).
+    const needToken = pickProvider(env) === "claude" || !!env.APP_TOKEN;
+    if (needToken && (!env.APP_TOKEN || request.headers.get("X-App-Token") !== env.APP_TOKEN)) return json({ error: "unauthorized" }, 401, origin);
     if (env.LIMITER) {
       const { success } = await env.LIMITER.limit({ key: request.headers.get("CF-Connecting-IP") || "anon" });
       if (!success) return json({ error: "rate_limited" }, 429, origin);
