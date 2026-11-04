@@ -435,6 +435,18 @@
       t.onclick = function () { if (tilesOn()) localStorage.removeItem(TILE_KEY); else localStorage.setItem(TILE_KEY, '1'); t.textContent = tileLabel(); tap(); };
       h.parentNode.appendChild(t);
     }
+    // عرض لمرة وحدة تحت خانة الطلبية: «شغّل فهم الطلبيات بالذكاء؟»
+    var ot = document.getElementById('otext');
+    if (ot && hasCloud && !cloudOk() && !document.getElementById('np_aioffer') && localStorage.getItem('talabiyat_ai_offer') !== 'no') {
+      var of = document.createElement('div'); of.id = 'np_aioffer'; of.className = 'sample'; of.style.marginTop = '10px';
+      of.innerHTML = '<b>✨ جديد:</b> التطبيق صار يفهم الطلبيات الطويلة واللهجة أحسن بالذكاء (Claude).<div class="row" style="margin-top:8px"><button type="button" class="btn sm" id="np_aiyes">شغّله</button><button type="button" class="btn sec sm" id="np_aino">لا شكراً</button></div>';
+      ot.parentNode.appendChild(of);
+      document.getElementById('np_aiyes').onclick = async function () {
+        if (await askCloudConsent()) { localStorage.setItem(CLOUD_OK, '1'); localStorage.setItem(AI_KEY, '1'); window.toast && toast('✨ الذكاء شغّال ✅'); }
+        of.remove();
+      };
+      document.getElementById('np_aino').onclick = function () { localStorage.setItem('talabiyat_ai_offer', 'no'); of.remove(); };
+    }
     if (h && anyAI() && !document.getElementById('np_ai')) {
       var a = document.createElement('button'); a.type = 'button'; a.id = 'np_ai'; a.className = 'btn block sec';
       a.textContent = '🧪 الذكاء (تجريبي)' + (aiOn() ? ' — شغّال' : '');
