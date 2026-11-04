@@ -198,12 +198,17 @@
   function tap() { if (has('Haptics')) call('Haptics', 'impact', { style: 'LIGHT' }).catch(function () {}); }
   window.addEventListener('hashchange', tap);
 
-  // 10) 🧪 تجربة: فهم الطلبية بذكاء Apple اللي على الجهاز (Foundation Models، iOS 26+)
-  // مطفأة افتراضياً. لما تكون شغّالة: زر «التالي» بيسأل النموذج أولاً، ولو ما زبط بيرجع لـ parser.js العادي.
-  // كل شي على الجوال: ما في إنترنت ولا سيرفر.
-  var AI_KEY = 'talabiyat_ai_parse', AI_LOG = 'talabiyat_ai_log';
-  var hasAI = has('TalabiyatAI'), aiStatus = null;
+  // 10) 🧪 فهم الطلبية بالذكاء — بثلاث طبقات، والتطبيق بيشتغل كامل بدونها:
+  //   أ) Claude عبر سيرفرنا الوسيط (بس بعد موافقة صريحة، وفي إنترنت) — الأفضل بالعربي
+  //   ب) نموذج Apple على الجهاز (iOS 26+، مجاني، بدون إنترنت) — لما يدعم اللغة
+  //   ج) الفهم العادي parser.js — دايماً موجود
+  // مطفأة افتراضياً. بتنشغل من «المزيد ← 🧪 الذكاء».
+  var CLOUD = { url: '', token: '' }; // بينعبّوا بعد نشر ai-worker (شوف ai-worker/README.md)
+  var AI_KEY = 'talabiyat_ai_parse', AI_LOG = 'talabiyat_ai_log', CLOUD_OK = 'talabiyat_ai_cloud_consent';
+  var hasAI = has('TalabiyatAI'), hasCloud = !!(CLOUD.url && CLOUD.token), aiStatus = null;
   function aiOn() { return localStorage.getItem(AI_KEY) === '1'; }
+  function cloudOk() { return hasCloud && localStorage.getItem(CLOUD_OK) === '1'; }
+  function anyAI() { return hasAI || hasCloud; }
   function h(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   var AI_REASON = {
     ok: '✅ جاهز على هالجهاز',
@@ -215,25 +220,60 @@
     unavailable: '❌ مش متوفر حالياً'
   };
   var AI_ERR = {
-    unsupported_language: 'لغة الجهاز أو لغة النص مش مدعومة من النموذج',
-    guardrail: 'النموذج رفض النص',
+    unsupported_language: 'لغة الجهاز أو النص مش مدعومة من نموذج Apple',
+    guardrail: 'النموذج رفض النص', refused: 'النموذج رفض النص',
     too_long: 'النص طويل كتير',
-    model_unavailable: 'النموذج مش متوفر',
-    timeout: 'النموذج طوّل كتير'
+    model_unavailable: 'نموذج Apple مش متوفر',
+    timeout: 'الذكاء طوّل كتير',
+    offline: 'ما في إنترنت',
+    rate_limited: 'طلبات كتير ورا بعض، استنى دقيقة',
+    unauthorized: 'إعداد السيرفر غلط', server_key_invalid: 'مفتاح Claude بالسيرفر غلط',
+    no_engine: 'ما في ذكاء متاح'
   };
+  var ENGINE_LABEL = { cloud: '☁️ Claude', apple: '📱 Apple' };
   function getAIStatus() {
     if (!hasAI) return Promise.resolve({ available: false, reason: 'unavailable' });
     return call('TalabiyatAI', 'status').then(function (s) { aiStatus = s; return s; }).catch(function () { return { available: false, reason: 'unavailable' }; });
   }
-  function errCode(e) { var m = String((e && (e.message || e.errorMessage)) || e || ''); for (var k in AI_ERR) if (m.indexOf(k) >= 0) return k; return 'generation_failed'; }
-  // ينادي النموذج ويحوّل الجواب لنفس شكل OrderParser.parse
-  async function aiParse(text) {
+  function errCode(e) { var m = String((e && (e.code || e.message || e.errorMessage)) || e || ''); for (var k in AI_ERR) if (m.indexOf(k) >= 0) return k; return 'generation_failed'; }
+  function withTimeout(p, ms) { return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout')); }, ms); })]); }
+
+  async function cloudParse(text, products, rests) {
+    if (!navigator.onLine) throw new Error('offline');
+    var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, 20000);
+    try {
+      var r = await fetch(CLOUD.url.replace(/\/$/, '') + '/parse-order', {
+        method: 'POST', signal: ctl ? ctl.signal : undefined,
+        headers: { 'Content-Type': 'application/json', 'X-App-Token': CLOUD.token },
+        // بس الأسماء والأرقام — ما في تلفونات ولا عناوين ولا حسابات
+        body: JSON.stringify({ text: text, products: products.map(function (p) { return { id: p.id, name: p.name, unit: p.unit }; }), restaurants: rests.map(function (x) { return { id: x.id, name: x.name }; }) })
+      });
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(j.error || ('http_' + r.status));
+      return j;
+    } catch (e) { if (e && e.name === 'AbortError') throw new Error('timeout'); throw e; }
+    finally { clearTimeout(t); }
+  }
+  function appleParse(text, products, rests) {
+    return withTimeout(call('TalabiyatAI', 'parseOrder', { text: text, products: products.map(function (p) { return { id: p.id, name: p.name, unit: p.unit }; }), restaurants: rests.map(function (x) { return { id: x.id, name: x.name }; }) }), 25000);
+  }
+  // ينادي أحسن طبقة متاحة ويحوّل الجواب لنفس شكل OrderParser.parse. لو كلهم فشلوا بيرمي آخر خطأ.
+  async function aiParse(text, only) {
     var Lk = await window.Store.api('/api/m/lookups');
     var products = Lk.products, rests = Lk.restaurants.filter(function (r) { return r.active; });
-    var res = await Promise.race([
-      call('TalabiyatAI', 'parseOrder', { text: text, products: products.map(function (p) { return { id: p.id, name: p.name, unit: p.unit }; }), restaurants: rests.map(function (r) { return { id: r.id, name: r.name }; }) }),
-      new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout')); }, 25000); })
-    ]);
+    var order = only ? [only] : [];
+    if (!only) {
+      if (cloudOk() && navigator.onLine) order.push('cloud');
+      if (hasAI) { var st = aiStatus || await getAIStatus(); if (st.available) order.push('apple'); }
+    }
+    if (!order.length) throw new Error('no_engine');
+    var res = null, engine = null, lastErr = null;
+    for (var i = 0; i < order.length && !res; i++) {
+      try { res = order[i] === 'cloud' ? await cloudParse(text, products, rests) : await appleParse(text, products, rests); engine = order[i]; }
+      catch (e) { lastErr = e; }
+    }
+    if (!res) throw lastErr || new Error('no_engine');
     var pIds = {}, rIds = {}; products.forEach(function (p) { pIds[p.id] = p; }); rests.forEach(function (r) { rIds[r.id] = r; });
     var drafts = (res.drafts || []).map(function (d) {
       var items = {}, units = {};
@@ -246,16 +286,16 @@
       return { restaurant_id: rIds[d.restaurantId] ? d.restaurantId : null, items: items, units: units, note: String(d.note || '').slice(0, 200), matched: Object.keys(items).length > 0 };
     }).filter(function (d) { return d.restaurant_id || d.matched; });
     var day = Number(res.dayOffset);
-    return { date_offset: day >= 0 && day <= 2 ? day : null, drafts: drafts, ms: res.ms || 0, products: products, rests: rests };
+    return { date_offset: day >= 0 && day <= 2 ? day : null, drafts: drafts, ms: res.ms || 0, engine: engine, products: products, rests: rests };
   }
   function logAI(entry) {
     try { var a = JSON.parse(localStorage.getItem(AI_LOG) || '[]'); a.unshift(entry); localStorage.setItem(AI_LOG, JSON.stringify(a.slice(0, 30))); } catch (_) {}
   }
-  // نعترض ضغطة «التالي» قبل manager.js (مرحلة الالتقاط)، ولو النموذج فشل منكمّل عادي
+  // نعترض ضغطة «التالي» قبل manager.js (مرحلة الالتقاط)، ولو الذكاء فشل منكمّل عادي
   var bypass = false;
   document.addEventListener('click', function (e) {
     var btn = e.target && e.target.closest && e.target.closest('#parse');
-    if (!btn || bypass || !hasAI || !aiOn()) return;
+    if (!btn || bypass || !anyAI() || !aiOn()) return;
     var ta = document.getElementById('otext'), text = ta ? ta.value.trim() : '';
     if (!text) return;
     e.stopImmediatePropagation(); e.preventDefault();
@@ -268,17 +308,36 @@
     }
     aiParse(text).then(function (r) {
       var classic = window.OrderParser.parse(text, r.products, r.rests);
-      logAI({ t: Date.now(), text: text, ms: r.ms, ai: r.drafts, classic: classic.drafts });
-      if (!r.drafts.length) { window.toast && toast('🧪 النموذج ما فهم الطلبية — استعملت الفهم العادي'); return go(null); }
+      logAI({ t: Date.now(), text: text, engine: r.engine, ms: r.ms, ai: r.drafts, classic: classic.drafts });
+      if (!r.drafts.length) { window.toast && toast('🧪 الذكاء ما فهم الطلبية — استعملت الفهم العادي'); return go(null); }
       go({ date_offset: r.date_offset, drafts: r.drafts });
     }).catch(function (err) {
       var c = errCode(err); logAI({ t: Date.now(), text: text, error: c });
-      window.toast && toast('🧪 ' + (AI_ERR[c] || 'النموذج ما زبط') + ' — استعملت الفهم العادي');
+      if (c !== 'no_engine' && window.toast) toast('🧪 ' + (AI_ERR[c] || 'الذكاء ما زبط') + ' — استعملت الفهم العادي');
       go(null);
     });
   }, true);
 
-  // شاشة التجربة: الحالة + تشغيل/إطفاء + مقارنة النموذج مع الفهم العادي على نفس النص
+  // موافقة صريحة قبل ما نبعت أي شي برا الجوال (Apple 5.1.2)
+  function askCloudConsent() {
+    return new Promise(function (resolve) {
+      var ov = document.createElement('div'); ov.id = 'ai_consent';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center';
+      ov.innerHTML = '<div style="background:#fff;width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90%;overflow:auto">' +
+        '<div style="font-size:21px;font-weight:800;margin-bottom:8px">☁️ فهم الطلبية بـ Claude</div>' +
+        '<div style="line-height:1.8">لما تكبس «التالي»، التطبيق بيبعت عبر الإنترنت لخدمة <b>Claude</b> من شركة <b>Anthropic</b> (عن طريق سيرفر وسيط تبع التطبيق):<ul style="margin:6px 0;padding-inline-start:20px">' +
+        '<li>نص الطلبية اللي كتبته أو حكيته</li><li>أسماء الأصناف وأسماء الزبائن (بدون تلفونات ولا عناوين ولا مبالغ)</li></ul>' +
+        'الهدف بس فهم الطلبية. سيرفرنا ما بيخزّن شي، و Anthropic ما بتستعمل هالبيانات لتدريب نماذجها.<br>' +
+        'الحسابات والمخزون وكل باقي البيانات بتضل على الجوال.<br><span class="mut">بتقدر تطفيها بأي وقت من نفس الشاشة.</span></div>' +
+        '<button class="btn block" id="ai_c_yes" style="margin-top:12px">موافق، شغّلها</button>' +
+        '<button class="btn block sec" id="ai_c_no" style="margin-top:8px">لا، خليها على الجهاز بس</button></div>';
+      document.body.appendChild(ov);
+      document.getElementById('ai_c_yes').onclick = function () { ov.remove(); resolve(true); };
+      document.getElementById('ai_c_no').onclick = function () { ov.remove(); resolve(false); };
+    });
+  }
+
+  // شاشة الذكاء: الحالة + تشغيل/إطفاء + الموافقة + مقارنة مع الفهم العادي على نفس النص
   function draftsHtml(drafts, products, rests) {
     if (!drafts || !drafts.length) return '<div class="mut">ما فهم شي</div>';
     var pn = {}, rn = {}; products.forEach(function (p) { pn[p.id] = p; }); rests.forEach(function (r) { rn[r.id] = r.name; });
@@ -290,46 +349,61 @@
   function dayTxt(o) { return o == null ? 'ما انذكر' : ['اليوم', 'بكرة', 'بعد بكرة'][o] || String(o); }
   async function openAILab() {
     if (document.getElementById('ai_ov')) return;
-    var s = await getAIStatus();
+    var s = hasAI ? await getAIStatus() : null;
     var ov = document.createElement('div'); ov.id = 'ai_ov';
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;overflow:auto';
     var log = []; try { log = JSON.parse(localStorage.getItem(AI_LOG) || '[]'); } catch (_) {}
     var stats = log.reduce(function (a, x) { if (x.error) a.err++; else a.ok++; return a; }, { ok: 0, err: 0 });
-    ov.innerHTML = '<div style="background:#3D6B2B;color:#fff;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:19px;position:sticky;top:0"><span>🧪 الذكاء على الجهاز (تجريبي)</span><button id="ai_x" style="background:#fff;color:#3D6B2B;border:0;border-radius:10px;padding:8px 16px;font-size:18px;font-weight:700">رجوع</button></div>' +
+    var canRun = (s && s.available) || cloudOk();
+    ov.innerHTML = '<div style="background:#3D6B2B;color:#fff;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:19px;position:sticky;top:0"><span>🧪 الذكاء (تجريبي)</span><button id="ai_x" style="background:#fff;color:#3D6B2B;border:0;border-radius:10px;padding:8px 16px;font-size:18px;font-weight:700">رجوع</button></div>' +
       '<div style="padding:14px">' +
-      '<div class="card"><b>الحالة:</b> ' + h(AI_REASON[s.reason] || s.reason) +
-      '<div class="mut" style="margin-top:6px">iOS ' + h(s.ios || '?') + ' · لغة الجهاز: ' + h(s.locale || '?') + '<br>العربي مدعوم: ' + (s.arabic ? '✅ نعم' : '❌ لا') + ' · لغة الجهاز مدعومة: ' + (s.localeSupported ? '✅' : '❌') + '</div>' +
-      (s.languages && s.languages.length ? '<details style="margin-top:6px"><summary class="mut">اللغات المدعومة (' + s.languages.length + ')</summary><div class="mut" dir="ltr">' + h(s.languages.join(', ')) + '</div></details>' : '') +
-      '<div class="mut" style="margin-top:8px">كل شي بصير على الجوال، ما في إنترنت ولا سيرفر. لو النموذج ما زبط، التطبيق بيرجع للفهم العادي.</div></div>' +
-      '<button class="btn block ' + (aiOn() ? '' : 'sec') + '" id="ai_tg" style="margin-top:10px">' + (aiOn() ? '🧪 فهم الطلبية بالذكاء: شغّال — اضغط للإطفاء' : '🧪 شغّل فهم الطلبية بالذكاء') + '</button>' +
+      '<button class="btn block ' + (aiOn() ? '' : 'sec') + '" id="ai_tg">' + (aiOn() ? '🧪 فهم الطلبية بالذكاء: شغّال — اضغط للإطفاء' : '🧪 شغّل فهم الطلبية بالذكاء') + '</button>' +
+      (hasCloud ? '<div class="card" style="margin-top:10px"><b>☁️ Claude (بالإنترنت)</b> — ' + (cloudOk() ? '✅ مسموح' : '⛔ مش مسموح') +
+        '<div class="mut" style="margin-top:4px">الأفضل بفهم العربي واللهجات. بيبعت نص الطلبية وأسماء الأصناف والزبائن بس.</div>' +
+        '<button class="btn sec sm" id="ai_cloud" style="margin-top:8px">' + (cloudOk() ? 'وقّف استعمال Claude' : 'اسمح باستعمال Claude') + '</button></div>' : '') +
+      (hasAI ? '<div class="card" style="margin-top:10px"><b>📱 Apple (على الجهاز)</b> — ' + h(AI_REASON[s.reason] || s.reason) +
+        '<div class="mut" style="margin-top:4px">مجاني وبدون إنترنت. iOS ' + h(s.ios || '?') + ' · لغة الجهاز: ' + h(s.locale || '?') + ' · العربي: ' + (s.arabic ? '✅' : '❌') + '</div>' +
+        (s.languages && s.languages.length ? '<details style="margin-top:6px"><summary class="mut">اللغات المدعومة (' + s.languages.length + ')</summary><div class="mut" dir="ltr">' + h(s.languages.join(', ')) + '</div></details>' : '') + '</div>' : '') +
+      '<div class="mut" style="margin-top:8px">الترتيب: Claude إذا مسموح وفي إنترنت، بعدين Apple إذا متوفر، وإلا الفهم العادي. التطبيق بيشتغل كامل بدون أي واحد منهم.</div>' +
       '<h2>قارن على نص</h2><textarea id="ai_t" rows="3" placeholder="مثال: السرايا ميتين ورق عنب و ١٠٠ ملفوف بكرة"></textarea>' +
-      '<button class="btn block" id="ai_go" style="margin-top:8px"' + (s.available ? '' : ' disabled') + '>قارن ▶</button><div id="ai_out"></div>' +
+      '<button class="btn block" id="ai_go" style="margin-top:8px"' + (canRun ? '' : ' disabled') + '>قارن ▶</button>' + (canRun ? '' : '<div class="mut center">شغّل Claude أو Apple أول</div>') + '<div id="ai_out"></div>' +
       '<div class="mut" style="margin-top:14px">سجل التجارب على هالجهاز: ' + stats.ok + ' نجحت · ' + stats.err + ' فشلت</div>' +
       (log.length ? '<button class="btn sec sm" id="ai_share" style="margin-top:6px">📤 شارك السجل (عشان نحسّن)</button> <button class="btn sec sm" id="ai_clr" style="margin-top:6px">🗑️ امسح السجل</button>' : '') +
       '</div>';
     document.body.appendChild(ov);
+    function reopen() { ov.remove(); openAILab(); }
     document.getElementById('ai_x').onclick = function () { ov.remove(); };
-    document.getElementById('ai_tg').onclick = function () {
-      if (aiOn()) localStorage.removeItem(AI_KEY); else localStorage.setItem(AI_KEY, '1');
-      tap(); ov.remove(); openAILab();
+    document.getElementById('ai_tg').onclick = async function () {
+      if (aiOn()) localStorage.removeItem(AI_KEY);
+      else {
+        if (hasCloud && !cloudOk() && !(s && s.available)) { if (await askCloudConsent()) localStorage.setItem(CLOUD_OK, '1'); }
+        localStorage.setItem(AI_KEY, '1');
+      }
+      tap(); reopen();
+    };
+    var cb = document.getElementById('ai_cloud');
+    if (cb) cb.onclick = async function () {
+      if (cloudOk()) localStorage.removeItem(CLOUD_OK);
+      else if (await askCloudConsent()) localStorage.setItem(CLOUD_OK, '1');
+      tap(); reopen();
     };
     var sh = document.getElementById('ai_share');
     if (sh) sh.onclick = function () { navigator.share({ title: 'سجل تجربة الذكاء — طلبيات', text: JSON.stringify(log, null, 1) }).catch(function () {}); };
     var cl = document.getElementById('ai_clr');
-    if (cl) cl.onclick = function () { localStorage.removeItem(AI_LOG); ov.remove(); openAILab(); };
+    if (cl) cl.onclick = function () { localStorage.removeItem(AI_LOG); reopen(); };
     document.getElementById('ai_go').onclick = async function () {
       var t = document.getElementById('ai_t').value.trim(), out = document.getElementById('ai_out');
       if (!t) return;
       out.innerHTML = '<div class="mut center" style="margin:10px">⏳ عم يفهم…</div>';
       try {
         var r = await aiParse(t), c = window.OrderParser.parse(t, r.products, r.rests);
-        logAI({ t: Date.now(), text: t, ms: r.ms, ai: r.drafts, classic: c.drafts });
+        logAI({ t: Date.now(), text: t, engine: r.engine, ms: r.ms, ai: r.drafts, classic: c.drafts });
         out.innerHTML = '<div class="grid2" style="margin-top:10px;align-items:start">' +
-          '<div class="card"><b>🧪 الذكاء</b> <span class="mut">(' + (r.ms / 1000).toFixed(1) + ' ث)</span><div class="mut">اليوم: ' + dayTxt(r.date_offset) + '</div>' + draftsHtml(r.drafts, r.products, r.rests) + '</div>' +
+          '<div class="card"><b>' + h(ENGINE_LABEL[r.engine] || '🧪 الذكاء') + '</b> <span class="mut">(' + (r.ms / 1000).toFixed(1) + ' ث)</span><div class="mut">اليوم: ' + dayTxt(r.date_offset) + '</div>' + draftsHtml(r.drafts, r.products, r.rests) + '</div>' +
           '<div class="card"><b>⚙️ العادي</b><div class="mut">اليوم: ' + dayTxt(c.date_offset) + '</div>' + draftsHtml(c.drafts, r.products, r.rests) + '</div></div>';
       } catch (err) {
         var code = errCode(err); logAI({ t: Date.now(), text: t, error: code });
-        out.innerHTML = '<div class="card" style="margin-top:10px">❌ ' + h(AI_ERR[code] || 'النموذج ما زبط') + ' <span class="mut" dir="ltr">(' + h(code) + ')</span></div>';
+        out.innerHTML = '<div class="card" style="margin-top:10px">❌ ' + h(AI_ERR[code] || 'الذكاء ما زبط') + ' <span class="mut" dir="ltr">(' + h(code) + ')</span></div>';
       }
     };
   }
@@ -361,9 +435,9 @@
       t.onclick = function () { if (tilesOn()) localStorage.removeItem(TILE_KEY); else localStorage.setItem(TILE_KEY, '1'); t.textContent = tileLabel(); tap(); };
       h.parentNode.appendChild(t);
     }
-    if (h && hasAI && !document.getElementById('np_ai')) {
+    if (h && anyAI() && !document.getElementById('np_ai')) {
       var a = document.createElement('button'); a.type = 'button'; a.id = 'np_ai'; a.className = 'btn block sec';
-      a.textContent = '🧪 الذكاء على الجهاز (تجريبي)' + (aiOn() ? ' — شغّال' : '');
+      a.textContent = '🧪 الذكاء (تجريبي)' + (aiOn() ? ' — شغّال' : '');
       a.onclick = openAILab; h.parentNode.appendChild(a);
     }
   }
