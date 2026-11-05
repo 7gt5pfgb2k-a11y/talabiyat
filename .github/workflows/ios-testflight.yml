@@ -28,6 +28,7 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Check Apple secrets
+        working-directory: .
         env:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
@@ -94,4 +95,5 @@ jobs:
 
       - name: Remove key
         if: always()
+        working-directory: .
         run: rm -rf "$RUNNER_TEMP/asc"
