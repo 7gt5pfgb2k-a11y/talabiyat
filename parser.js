@@ -68,7 +68,7 @@
     const tokens = norm(text).split(' ').filter(Boolean);
     let date = null;
     tokens.forEach((t, i) => {
-      if (/^(بكره|بكرا|بكرة|غدا|الغد|بكير)$/.test(t)) date = 1;
+      if (/^(بكره|بكرا|بكرة|غدا|الغد|بكير)$/.test(t)) { if (tokens[i - 1] !== 'بعد') date = 1; }
       else if (/^(اليوم|هلق|هلا)$/.test(t)) date = 0;
       else if (t === 'بعد' && /^(بكره|بكرا|غدا)$/.test(tokens[i + 1] || '')) date = 2;
     });
