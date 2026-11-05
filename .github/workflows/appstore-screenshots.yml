@@ -1,11 +1,11 @@
-# بيرفع صور App Store (ios-app/fastlane/screenshots) لنسخة التطبيق، بمفتاح App Store Connect نفسه.
-# ما بيلمس الوصف ولا النسخة ولا بيبعت للمراجعة.
-name: Upload App Store screenshots
+# بيرفع صور ونصوص App Store (ios-app/fastlane/screenshots + metadata) لنسخة التطبيق، بمفتاح App Store Connect نفسه.
+# ما بيرفع نسخة جديدة ولا بيبعت للمراجعة.
+name: Upload App Store page (screenshots + texts)
 
 on:
   push:
     branches: [ios-build]
-    paths: [ios-app/fastlane/screenshots/**, .github/workflows/appstore-screenshots.yml]
+    paths: [ios-app/fastlane/**, .github/workflows/appstore-screenshots.yml]
   workflow_dispatch:
 
 jobs:
@@ -33,14 +33,15 @@ jobs:
                     open(os.path.join(os.environ["RUNNER_TEMP"], "asc.json"), "w"))
           PY
           chmod 600 "$RUNNER_TEMP/asc.json"
-      - name: Upload screenshots
+      - name: Upload screenshots and texts
         run: |
           fastlane deliver \
             --api_key_path "$RUNNER_TEMP/asc.json" \
             --app_identifier app.talabiyat --platform ios --app_version 1.0 \
             --screenshots_path ios-app/fastlane/screenshots \
+            --metadata_path ios-app/fastlane/metadata \
             --overwrite_screenshots true \
-            --skip_binary_upload true --skip_metadata true --skip_app_version_update true \
+            --skip_binary_upload true --skip_app_version_update true --precheck_include_in_app_purchases false \
             --run_precheck_before_submit false --submit_for_review false --force true
       - name: Remove key
         if: always()
