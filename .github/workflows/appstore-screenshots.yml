@@ -1,0 +1,47 @@
+# بيرفع صور App Store (ios-app/fastlane/screenshots) لنسخة التطبيق، بمفتاح App Store Connect نفسه.
+# ما بيلمس الوصف ولا النسخة ولا بيبعت للمراجعة.
+name: Upload App Store screenshots
+
+on:
+  push:
+    branches: [ios-build]
+    paths: [ios-app/fastlane/screenshots/**, .github/workflows/appstore-screenshots.yml]
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+      - name: Write API key file (never printed)
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          json.dump({"key_id": os.environ["ASC_KEY_ID"], "issuer_id": os.environ["ASC_ISSUER_ID"],
+                     "key": os.environ["ASC_KEY_P8"], "in_house": False},
+                    open(os.path.join(os.environ["RUNNER_TEMP"], "asc.json"), "w"))
+          PY
+          chmod 600 "$RUNNER_TEMP/asc.json"
+      - name: Upload screenshots
+        run: |
+          fastlane deliver \
+            --api_key_path "$RUNNER_TEMP/asc.json" \
+            --app_identifier app.talabiyat --platform ios --app_version 1.0 \
+            --screenshots_path ios-app/fastlane/screenshots \
+            --overwrite_screenshots true \
+            --skip_binary_upload true --skip_metadata true --skip_app_version_update true \
+            --run_precheck_before_submit false --submit_for_review false --force true
+      - name: Remove key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc.json"
