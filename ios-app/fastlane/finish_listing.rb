@@ -8,6 +8,8 @@ require "spaceship"
 Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(filepath: ENV.fetch("ASC_KEY_JSON"))
 app = Spaceship::ConnectAPI::App.find("app.talabiyat") or abort("app.talabiyat not found")
 results = {}
+results["app_id"] = app.id
+results["links"] = "privacy: https://appstoreconnect.apple.com/apps/#{app.id}/distribution/privacy | version: https://appstoreconnect.apple.com/apps/#{app.id}/distribution/ios/version/inflight"
 
 def step(results, name)
   yield
