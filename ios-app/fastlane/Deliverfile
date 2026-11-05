@@ -1,0 +1,12 @@
+# إعدادات رفع صفحة App Store (fastlane deliver) — بدون رفع نسخة وبدون إرسال للمراجعة
+app_identifier "app.talabiyat"
+platform "ios"
+app_version "1.0"
+screenshots_path "./fastlane/screenshots"
+metadata_path "./fastlane/metadata"
+overwrite_screenshots true
+skip_binary_upload true
+skip_app_version_update true
+submit_for_review false
+run_precheck_before_submit false
+force true
