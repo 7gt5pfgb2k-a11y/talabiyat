@@ -10,3 +10,5 @@ skip_app_version_update true
 submit_for_review false
 run_precheck_before_submit false
 force true
+# النصوص انرفعت؛ هلأ الصور بس (fastlane بيتعطل على ملاحظات المراجعة قبل ما يتعبّى رقم التلفون). شيل السطر الجاي لترفع النصوص كمان.
+skip_metadata true
