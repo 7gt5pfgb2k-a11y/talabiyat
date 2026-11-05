@@ -294,10 +294,28 @@
         items[l.productId] = (items[l.productId] || 0) + q;
         if (l.inKilo) units[l.productId] = 'كغ';
       });
-      return { restaurant_id: rIds[d.restaurantId] ? d.restaurantId : null, items: items, units: units, note: String(d.note || '').slice(0, 200), matched: Object.keys(items).length > 0 };
+      var rid = rIds[d.restaurantId] && nameInText(rIds[d.restaurantId].name, text) ? d.restaurantId : null;
+      return { restaurant_id: rid, items: items, units: units, note: cleanNote(d.note), matched: Object.keys(items).length > 0 };
     }).filter(function (d) { return d.restaurant_id || d.matched; });
     var day = Number(res.dayOffset);
     return { date_offset: day >= 0 && day <= 2 ? day : null, drafts: drafts, ms: res.ms || 0, engine: engine, products: products, rests: rests };
+  }
+  // النموذج أحياناً بيخترع زبون: منقبل الزبون بس إذا جزء مميّز من اسمه موجود فعلاً بنص الطلبية
+  var NAME_STOP = /^(مطعم|مطاعم|محل|مطبخ|كافيه|كوفي|تجريبي|demo|ال)$/;
+  function nameInText(name, text) {
+    var N = window.OrderParser && window.OrderParser.norm; if (!N) return true;
+    var t = ' ' + N(text) + ' ';
+    var parts = N(name).replace(/[()]/g, ' ').split(' ').map(function (w) { return w.replace(/^(ال|وال|بال|لل)(?=...)/, ''); })
+      .filter(function (w) { return w.length >= 3 && !NAME_STOP.test(w); });
+    if (!parts.length) return true;
+    return parts.some(function (w) { return t.indexOf(w) >= 0; });
+  }
+  // الملاحظة ما لازم تكون بس يوم التوصيل (بكرة/اليوم…)
+  function cleanNote(note) {
+    var s = String(note || '').trim().slice(0, 200);
+    var N = window.OrderParser && window.OrderParser.norm;
+    var rest = N ? N(s).replace(/(^| )(بعد )?(بكره|بكرا|بكرة|غدا|الغد|اليوم)( |$)/g, ' ').trim() : s;
+    return rest ? s : '';
   }
   function logAI(entry) {
     try { var a = JSON.parse(localStorage.getItem(AI_LOG) || '[]'); a.unshift(entry); localStorage.setItem(AI_LOG, JSON.stringify(a.slice(0, 30))); } catch (_) {}

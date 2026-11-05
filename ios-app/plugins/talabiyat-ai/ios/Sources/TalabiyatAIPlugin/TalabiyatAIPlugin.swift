@@ -134,7 +134,9 @@ enum OrderAI {
         kitchen that sells stuffed grape leaves (ورق عنب), stuffed cabbage (ملفوف) and similar items to restaurants.
         Extract who ordered, which products, how many, and the delivery day.
         Only use ids that appear in the lists you are given. Never invent customers or products.
+        Use a customer id only if that customer's name (or a clear part of it) is written in the order text; otherwise use restaurantId 0.
         If a product is mentioned without a number, use quantity 0.
+        The note must not repeat the delivery day, the customer, products or quantities; leave it empty unless there is a real extra remark.
         """
         let prompt = """
         PRODUCTS (id: name (unit)):
