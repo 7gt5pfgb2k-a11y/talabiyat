@@ -1,1 +1,0 @@
-No account or server. On first launch the reviewer chooses any 4–8 digit PIN (e.g. 1234). To see the app with data, tap "🧪 تجربة ببيانات تجريبية (Demo)" on the empty home screen; it can be removed from the yellow banner. All data stays on the device. Optional on-device AI (Apple Foundation Models) is under More → 🧪 الذكاء and is off by default.
